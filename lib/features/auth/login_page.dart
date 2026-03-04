@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/sap_service.dart';
 import '../config/api_config_page.dart';
 import '../home/home_page.dart';
+import '../contador/contador_offline_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -45,8 +46,7 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    if (_usuarioController.text.isEmpty ||
-        _senhaController.text.isEmpty) {
+    if (_usuarioController.text.isEmpty || _senhaController.text.isEmpty) {
       _mostrarErro("Usuário e senha são obrigatórios.");
       return;
     }
@@ -125,7 +125,8 @@ class _LoginPageState extends State<LoginPage> {
 
               const SizedBox(height: 40),
 
-              Align(
+              // Campos de Usuário e Senha
+              const Align(
                 alignment: Alignment.centerLeft,
                 child: Text("Usuário"),
               ),
@@ -139,7 +140,7 @@ class _LoginPageState extends State<LoginPage> {
 
               const SizedBox(height: 20),
 
-              Align(
+              const Align(
                 alignment: Alignment.centerLeft,
                 child: Text("Senha"),
               ),
@@ -174,6 +175,7 @@ class _LoginPageState extends State<LoginPage> {
 
               const SizedBox(height: 10),
 
+              // Botão de Entrar (Login SAP)
               SizedBox(
                 width: double.infinity,
                 height: 48,
@@ -187,9 +189,41 @@ class _LoginPageState extends State<LoginPage> {
                           color: Colors.white,
                         )
                       : const Text(
-                          "Entrar",
+                          "Entrar e Sincronizar",
                           style: TextStyle(color: Colors.white),
                         ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Botão de Modo Contador Offline
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF0A6ED1)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () {
+                    // Agora navega de verdade para a tela offline
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const ContadorOfflinePage()),
+                    );
+                  },
+                  icon: const Icon(Icons.qr_code_scanner, color: Color(0xFF0A6ED1)),
+                  label: const Text(
+                    "Modo Contador Offline",
+                    style: TextStyle(
+                      color: Color(0xFF0A6ED1),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
 

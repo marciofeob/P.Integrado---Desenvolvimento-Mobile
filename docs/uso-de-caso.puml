@@ -1,4 +1,4 @@
-@startuml
+@startuml Casos
 title STOX - Diagrama de Casos de Uso
 
 actor Usuario

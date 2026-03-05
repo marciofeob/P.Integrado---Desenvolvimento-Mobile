@@ -1,4 +1,4 @@
-@startuml
+@startuml Stories
 title STOX - Caso de Uso → User Stories → MVP
 
 rectangle "Caso de Uso" {

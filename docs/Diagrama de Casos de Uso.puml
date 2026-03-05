@@ -1,4 +1,4 @@
-@startuml
+@startuml Estoque
 title STOX - Sistema de Contagem Inteligente de Estoque
 
 actor Usuario

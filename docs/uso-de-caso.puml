@@ -1,0 +1,24 @@
+@startuml
+title STOX - Diagrama de Casos de Uso
+
+actor Usuario
+actor "SAP Business One" as SAP
+actor "Motor de IA (YOLO)" as IA
+
+rectangle Sistema {
+
+Usuario --> (Realizar Login)
+
+Usuario --> (Realizar Contagem de Estoque)
+
+Usuario --> (Sincronizar Inventario com SAP)
+
+(Realizar Contagem de Estoque) --> (Processar Contagem com IA)
+
+(Processar Contagem com IA) --> IA
+
+(Sincronizar Inventario com SAP) --> SAP
+
+}
+
+@enduml

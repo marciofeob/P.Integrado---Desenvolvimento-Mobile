@@ -19,14 +19,20 @@ class _LoginPageState extends State<LoginPage> {
   bool _carregando = false;
   final Color primaryColor = const Color(0xFF0A6ED1);
 
-  void _limparCampos() => setState(() { _usuarioController.clear(); _senhaController.clear(); });
+  void _limparCampos() => setState(() {
+    _usuarioController.clear();
+    _senhaController.clear();
+  });
 
   Future<void> _login() async {
     final prefs = await SharedPreferences.getInstance();
     final sapUrl = prefs.getString('sap_url');
     final companyDb = prefs.getString('sap_company');
 
-    if (sapUrl == null || sapUrl.isEmpty || companyDb == null || companyDb.isEmpty) {
+    if (sapUrl == null ||
+        sapUrl.isEmpty ||
+        companyDb == null ||
+        companyDb.isEmpty) {
       _mostrarErro("Configure a API SAP antes de prosseguir.");
       return;
     }
@@ -49,7 +55,10 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (!mounted) return;
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomePage()),
+      );
     } catch (e) {
       _mostrarErro("Erro de conexão com o servidor SAP.");
     } finally {
@@ -58,7 +67,9 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _mostrarErro(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: Colors.red, content: Text(msg)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(backgroundColor: Colors.red, content: Text(msg)));
   }
 
   @override
@@ -71,18 +82,29 @@ class _LoginPageState extends State<LoginPage> {
           child: Column(
             children: [
               const SizedBox(height: 60),
-              Image.asset("assets/images/Logo_colorida.png", height: 70),
+              Image.asset("assets/images/Logo_colorida.png", height: 80),
               const SizedBox(height: 24),
-              const Text("Contagem de Estoque", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const Text(
+                "Contagem de Estoque",
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
-              const Text("Informe seu usuário e senha do SAP", style: TextStyle(color: Colors.grey)),
+              const Text(
+                "Informe seu usuário e senha do SAP",
+                style: TextStyle(color: Colors.grey),
+              ),
               const SizedBox(height: 40),
               TextField(
                 controller: _usuarioController,
                 decoration: InputDecoration(
                   labelText: "Usuário",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: primaryColor, width: 2), borderRadius: BorderRadius.circular(8)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: primaryColor, width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -91,17 +113,31 @@ class _LoginPageState extends State<LoginPage> {
                 obscureText: _ocultarSenha,
                 decoration: InputDecoration(
                   labelText: "Senha",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: primaryColor, width: 2), borderRadius: BorderRadius.circular(8)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: primaryColor, width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   suffixIcon: IconButton(
-                    icon: Icon(_ocultarSenha ? Icons.visibility_off : Icons.visibility),
-                    onPressed: () => setState(() => _ocultarSenha = !_ocultarSenha),
+                    icon: Icon(
+                      _ocultarSenha ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () =>
+                        setState(() => _ocultarSenha = !_ocultarSenha),
                   ),
                 ),
               ),
               Align(
                 alignment: Alignment.centerRight,
-                child: TextButton(onPressed: _limparCampos, child: const Text("Limpar", style: TextStyle(color: Colors.grey))),
+                child: TextButton(
+                  onPressed: _limparCampos,
+                  child: const Text(
+                    "Limpar",
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
               ),
               const SizedBox(height: 10),
               SizedBox(
@@ -111,11 +147,18 @@ class _LoginPageState extends State<LoginPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryColor,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     elevation: 0,
                   ),
                   onPressed: _carregando ? null : _login,
-                  child: _carregando ? const CircularProgressIndicator(color: Colors.white) : const Text("ENTRAR E SINCRONIZAR", style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: _carregando
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text(
+                          "ENTRAR E SINCRONIZAR",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -125,18 +168,37 @@ class _LoginPageState extends State<LoginPage> {
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: primaryColor),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ContadorOfflinePage())),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ContadorOfflinePage(),
+                    ),
+                  ),
                   icon: Icon(Icons.qr_code_scanner, color: primaryColor),
-                  label: Text("MODO CONTADOR OFFLINE", style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold)),
+                  label: Text(
+                    "MODO CONTADOR OFFLINE",
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
               TextButton.icon(
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApiConfigPage())),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ApiConfigPage()),
+                ),
                 icon: const Icon(Icons.settings, color: Colors.grey),
-                label: const Text("Configurações da API", style: TextStyle(color: Colors.grey)),
+                label: const Text(
+                  "Configurações da API",
+                  style: TextStyle(color: Colors.grey),
+                ),
               ),
               const SizedBox(height: 40),
               Image.asset("assets/images/sap-logo.png", height: 20),

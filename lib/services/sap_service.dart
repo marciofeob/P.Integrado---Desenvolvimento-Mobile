@@ -1,12 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SapService {
   // ==========================================
-  // CONFIGURAÇÃO DE CLIENTE (SSL)
+  // CONFIGURAÇÃO DE CLIENTE (SSL) E URL
   // ==========================================
 
   /// Cria um cliente HTTP que respeita a configuração de SSL do usuário
@@ -15,13 +16,17 @@ class SapService {
     final permitirInseguro = prefs.getBool('sap_allow_untrusted') ?? true;
 
     if (permitirInseguro) {
-      // Ignora a validação de certificado SSL (necessário para certificados autoassinados)
       final ioClient = HttpClient()
         ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
       return IOClient(ioClient);
     }
-    // Retorna o cliente padrão com SSL estrito
     return http.Client();
+  }
+
+  /// Helper para garantir que a URL base termina com '/'
+  static String _prepareUrl(String url) {
+    if (url.isEmpty) return "";
+    return url.endsWith('/') ? url : '$url/';
   }
 
   // ==========================================
@@ -40,17 +45,17 @@ class SapService {
 
     try {
       final client = await _getClient();
-      final response = await client
-          .post(
-            Uri.parse('$baseUrl/Login'),
-            headers: {"Content-Type": "application/json"},
-            body: jsonEncode({
-              "CompanyDB": company,
-              "UserName": usuario,
-              "Password": senha,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
+      final fullUrl = "${_prepareUrl(baseUrl)}Login";
+      
+      final response = await client.post(
+        Uri.parse(fullUrl),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "CompanyDB": company,
+          "UserName": usuario,
+          "Password": senha,
+        }),
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -71,7 +76,7 @@ class SapService {
       }
       return false;
     } catch (e) {
-      print("Erro de conexão no login: $e");
+      debugPrint("❌ Erro de conexão no login: $e");
       return false;
     }
   }
@@ -84,10 +89,11 @@ class SapService {
     if (baseUrl != null && session != null) {
       try {
         final client = await _getClient();
+        final fullUrl = "${_prepareUrl(baseUrl)}Logout";
         await client.post(
-          Uri.parse('$baseUrl/Logout'),
+          Uri.parse(fullUrl),
           headers: {"Cookie": "B1SESSION=$session"},
-        );
+        ).timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
     await prefs.remove('B1SESSION');
@@ -95,10 +101,54 @@ class SapService {
   }
 
   // ==========================================
-  // MÉTODOS DE INVENTÁRIO (SINCRO)
+  // MÉTODOS DE CONSULTA (ITEM)
   // ==========================================
 
-  static Future<Map<String, dynamic>?> getItem(String itemCode) async {
+  /// NOVO MÉTODO: Busca itens por código ou nome (contém texto)
+  static Future<List<dynamic>> searchItems(String termo) async {
+    final prefs = await SharedPreferences.getInstance();
+    final baseUrl = prefs.getString('sap_url');
+    final session = prefs.getString('B1SESSION');
+    final routeId = prefs.getString('ROUTEID');
+
+    if (baseUrl == null || session == null) return [];
+
+    try {
+      final client = await _getClient();
+      final formattedUrl = _prepareUrl(baseUrl);
+      
+      // Filtro OData: Busca exata pelo código OU se o nome contém o termo
+      // Nota: 'contains' diferencia maiúsculas/minúsculas dependendo da config do BD SAP, 
+      // mas geralmente funciona bem para buscas rápidas.
+      final filter = "\$filter=ItemCode eq '$termo' or contains(ItemName, '$termo')";
+      final select = "\$select=ItemCode,ItemName";
+      
+      final fullUri = Uri.parse("${formattedUrl}Items?$filter&$select");
+
+      debugPrint("🔍 Buscando lista de itens em: $fullUri");
+
+      final response = await client.get(
+        fullUri,
+        headers: {
+          "Cookie": "B1SESSION=$session; ROUTEID=$routeId",
+          "Accept": "application/json",
+        },
+      ).timeout(const Duration(seconds: 12));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['value'] as List<dynamic>;
+      } else {
+        debugPrint("❌ Erro na busca SAP: ${response.body}");
+        return [];
+      }
+    } catch (e) {
+      debugPrint("💥 Exceção ao pesquisar itens: $e");
+      return [];
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getDetailedItem(String itemCode) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
     final session = prefs.getString('B1SESSION');
@@ -108,21 +158,41 @@ class SapService {
 
     try {
       final client = await _getClient();
-      final response = await client.get(
-        Uri.parse(
-          "$baseUrl/Items('$itemCode')?\$select=ItemCode,ItemName,BarCode",
-        ),
-        headers: {"Cookie": "B1SESSION=$session; ROUTEID=$routeId"},
-      );
+      final formattedUrl = _prepareUrl(baseUrl);
+      
+      final cleanCode = itemCode.trim().toUpperCase();
+      
+      const fields = "ItemCode,ItemName,InventoryItem,SalesItem,PurchaseItem,InventoryUOM,PurchaseUnit,SalesUnit,SalesPackagingUnit,Frozen,ItemWarehouseInfoCollection";
+      
+      final endpoint = "Items('$cleanCode')?\$select=$fields";
+      final fullUri = Uri.parse("$formattedUrl$endpoint");
+      
+      debugPrint("🔍 Efetuando busca dinâmica em: $fullUri");
 
-      if (response.statusCode == 200) return jsonDecode(response.body);
+      final response = await client.get(
+        fullUri,
+        headers: {
+          "Cookie": "B1SESSION=$session; ROUTEID=$routeId",
+          "Accept": "application/json",
+        },
+      ).timeout(const Duration(seconds: 12));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        debugPrint("❌ Erro SAP (${response.statusCode}): ${response.body}");
+        return null;
+      }
     } catch (e) {
-      print("Erro ao buscar item $itemCode: $e");
+      debugPrint("💥 Exceção na busca detalhada: $e");
+      return null;
     }
-    return null;
   }
 
-  /// Envia as contagens e retorna uma String? (null se sucesso, mensagem se erro)
+  // ==========================================
+  // MÉTODOS DE INVENTÁRIO (SINCRO)
+  // ==========================================
+
   static Future<String?> postInventoryCounting(
     List<Map<String, dynamic>> contagens,
   ) async {
@@ -131,9 +201,7 @@ class SapService {
     final session = prefs.getString('B1SESSION');
     final routeId = prefs.getString('ROUTEID');
 
-    if (baseUrl == null || session == null) {
-      return "Configuração de API ausente.";
-    }
+    if (baseUrl == null || session == null) return "Sessão expirada ou configuração ausente.";
 
     final payload = {
       "CountDate": DateTime.now().toIso8601String().split('T')[0],
@@ -149,44 +217,34 @@ class SapService {
 
     try {
       final client = await _getClient();
+      final formattedUrl = _prepareUrl(baseUrl);
+      final fullUri = Uri.parse("${formattedUrl}InventoryCountings");
+
       final response = await client.post(
-        Uri.parse("$baseUrl/InventoryCountings"),
+        fullUri,
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
           "Cookie": "B1SESSION=$session; ROUTEID=$routeId",
         },
         body: jsonEncode(payload),
-      );
+      ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 201 || response.statusCode == 200) {
-        return null; // Sucesso
+        return null;
       } else {
         try {
           final errorBody = jsonDecode(response.body);
-          
-          String sapMessage = errorBody['error']['message']['value'] ??
-                              errorBody['error']['message'].toString();
-
-          String itemCod = "";
-          if (contagens.isNotEmpty) {
-            itemCod = contagens.first['itemCode'].toString().toUpperCase();
-          }
-
-          if (sapMessage.contains("already been added")) {
-            return "O item $itemCod já possui uma contagem em aberto no SAP. "
-                   "Peça ao administrativo para encerrar este item antes de tentar novamente.";
-          }
-
-          return "Erro no Item $itemCod: $sapMessage";
-          
+          String sapMessage = errorBody['error']['message']['value'] ?? 
+                               errorBody['error']['message'].toString();
+          return "SAP diz: $sapMessage";
         } catch (_) {
-          return "Erro SAP (${response.statusCode}): ${response.body}";
+          return "Erro servidor (${response.statusCode})";
         }
       }
     } catch (e) {
-      print("Exceção na sincronização: $e");
-      return "Falha de conexão com o servidor.";
+      debugPrint("Exceção na sincronização: $e");
+      return "Falha de comunicação. Verifique o Wi-Fi.";
     }
   }
 }

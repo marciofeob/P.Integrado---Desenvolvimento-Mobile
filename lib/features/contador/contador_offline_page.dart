@@ -16,16 +16,18 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   final _quantidadeController = TextEditingController(text: '1');
   final _focusNodeCodigo = FocusNode();
   final Color primaryColor = const Color(0xFF0A6ED1);
-  final AudioPlayer _audioPlayer = AudioPlayer(); // Adicionado Player de Áudio
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  
+  // Variável para evitar múltiplas leituras e erros de navegação
+  bool _scannerProcessando = false;
 
-  // Função auxiliar para tocar som e vibrar
   Future<void> _tocarFeedback(String assetPath, {bool isError = false}) async {
     try {
       if (await Vibration.hasVibrator() ?? false) {
         if (isError) {
-          Vibration.vibrate(pattern: [0, 200, 100, 300]); // Alerta de erro
+          Vibration.vibrate(pattern: [0, 200, 100, 300]);
         } else {
-          Vibration.vibrate(duration: 100); // Bip rápido
+          Vibration.vibrate(duration: 100);
         }
       }
       await _audioPlayer.play(AssetSource(assetPath));
@@ -44,26 +46,142 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     });
   }
 
-  void _confirmarExclusao(int id, String itemCode) {
-    showDialog(
+  void _abrirScanner() {
+    _scannerProcessando = false;
+    
+    // Define o tamanho da janela de leitura (ex: 250x150)
+    final scanWindow = Rect.fromCenter(
+      center: Offset(MediaQuery.of(context).size.width / 2, (MediaQuery.of(context).size.height * 0.7) / 2 - 50),
+      width: 250,
+      height: 150,
+    );
+
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Excluir Registro'),
-        content: Text('Deseja remover a contagem do item $itemCode?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-          TextButton(
-            onPressed: () async {
-              await DatabaseHelper.instance.excluirContagem(id);
-              Navigator.pop(context);
-              setState(() {});
-              _mostrarMensagem('Registro removido', Colors.blueGrey);
-            },
-            child: const Text('EXCLUIR', style: TextStyle(color: Colors.red)),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.8,
+        decoration: const BoxDecoration(
+          color: Colors.white, 
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(width: 40, height: 4, color: Colors.grey[300]),
+            AppBar(
+              title: const Text('Aponte para o Código'), 
+              centerTitle: true, 
+              backgroundColor: Colors.transparent, 
+              elevation: 0, 
+              leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))
+            ),
+            Expanded(
+              child: Stack(
+                children: [
+                  MobileScanner(
+                    scanWindow: scanWindow, // Limita a área de leitura
+                    onDetect: (capture) async {
+                      if (_scannerProcessando) return;
+                      
+                      final barcodes = capture.barcodes;
+                      if (barcodes.isNotEmpty) {
+                        _scannerProcessando = true;
+                        final code = barcodes.first.rawValue ?? "";
+                        
+                        await _tocarFeedback('sounds/beep.mp3');
+                        
+                        if (!mounted) return;
+                        setState(() => _codigoController.text = code);
+                        
+                        // Fecha apenas o modal do scanner
+                        Navigator.of(context).pop(); 
+                        
+                        // Foca na quantidade após um breve delay
+                        Future.delayed(const Duration(milliseconds: 300), () {
+                          if (mounted) _focusNodeCodigo.nextFocus();
+                        });
+                      }
+                    },
+                  ),
+                  // Overlay para escurecer o que está fora da janela de leitura
+                  ColorFiltered(
+                    colorFilter: ColorFilter.mode(
+                      Colors.black.withOpacity(0.5),
+                      BlendMode.srcOut,
+                    ),
+                    child: Stack(
+                      children: [
+                        Container(color: Colors.black),
+                        Center(
+                          child: Container(
+                            width: scanWindow.width,
+                            height: scanWindow.height,
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Moldura da janela
+                  Center(
+                    child: Container(
+                      width: scanWindow.width,
+                      height: scanWindow.height,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: primaryColor, width: 3),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text("Alinhe o código dentro do retângulo azul"),
+            )
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> _salvarContagem() async {
+    final itemCode = _codigoController.text.trim();
+    final quantidadeStr = _quantidadeController.text.trim();
+    
+    if (itemCode.isEmpty || quantidadeStr.isEmpty) { 
+      await _tocarFeedback('sounds/error_beep.mp3', isError: true);
+      _mostrarMensagem('Preencha todos os campos!', Colors.orange); 
+      return; 
+    }
+    
+    final quantidade = double.tryParse(quantidadeStr.replaceAll(',', '.'));
+    if (quantidade == null || quantidade <= 0) { 
+      await _tocarFeedback('sounds/error_beep.mp3', isError: true);
+      _mostrarMensagem('Quantidade inválida!', Colors.red); 
+      return; 
+    }
+    
+    try {
+      await DatabaseHelper.instance.inserirContagem(itemCode, quantidade);
+      _mostrarMensagem('Item $itemCode salvo!', Colors.green);
+      _codigoController.clear();
+      _quantidadeController.text = '1';
+      setState(() {});
+      _focusNodeCodigo.requestFocus();
+    } catch (e) { 
+      _mostrarMensagem('Erro: $e', Colors.red); 
+    }
+  }
+
+  void _mostrarMensagem(String msg, Color cor) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: cor, duration: const Duration(seconds: 2)));
   }
 
   void _abrirEdicao(Map<String, dynamic> item) {
@@ -105,75 +223,26 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     );
   }
 
-  void _abrirScanner() {
-    showModalBottomSheet(
+  void _confirmarExclusao(int id, String itemCode) {
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.7,
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        child: Column(
-          children: [
-            const SizedBox(height: 10),
-            Container(width: 40, height: 4, color: Colors.grey[300]),
-            AppBar(title: const Text('Escanear Código'), centerTitle: true, backgroundColor: Colors.transparent, elevation: 0, leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))),
-            Expanded(
-              child: MobileScanner(
-                onDetect: (capture) async {
-                  final barcodes = capture.barcodes;
-                  if (barcodes.isNotEmpty) {
-                    // SUCESSO DE LEITURA: Toca o beep.mp3 e vibra rápido
-                    await _tocarFeedback('sounds/beep.mp3');
-                    
-                    setState(() => _codigoController.text = barcodes.first.rawValue ?? "");
-                    if (!mounted) return;
-                    Navigator.pop(context);
-                    _focusNodeCodigo.nextFocus();
-                  }
-                }
-              ),
-            ),
-          ],
-        ),
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir Registro'),
+        content: Text('Deseja remover a contagem do item $itemCode?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
+          TextButton(
+            onPressed: () async {
+              await DatabaseHelper.instance.excluirContagem(id);
+              Navigator.pop(context);
+              setState(() {});
+              _mostrarMensagem('Registro removido', Colors.blueGrey);
+            },
+            child: const Text('EXCLUIR', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
-  }
-
-  Future<void> _salvarContagem() async {
-    final itemCode = _codigoController.text.trim();
-    final quantidadeStr = _quantidadeController.text.trim();
-    
-    // ERRO DE VALIDAÇÃO: Campos vazios
-    if (itemCode.isEmpty || quantidadeStr.isEmpty) { 
-      await _tocarFeedback('sounds/error_beep.mp3', isError: true);
-      _mostrarMensagem('Preencha todos os campos!', Colors.orange); 
-      return; 
-    }
-    
-    final quantidade = double.tryParse(quantidadeStr.replaceAll(',', '.'));
-    
-    // ERRO DE VALIDAÇÃO: Quantidade inválida
-    if (quantidade == null || quantidade <= 0) { 
-      await _tocarFeedback('sounds/error_beep.mp3', isError: true);
-      _mostrarMensagem('Quantidade inválida!', Colors.red); 
-      return; 
-    }
-    
-    try {
-      await DatabaseHelper.instance.inserirContagem(itemCode, quantidade);
-      _mostrarMensagem('Item $itemCode salvo!', Colors.green);
-      _codigoController.clear();
-      _quantidadeController.text = '1';
-      setState(() {});
-      _focusNodeCodigo.requestFocus();
-    } catch (e) { 
-      _mostrarMensagem('Erro: $e', Colors.red); 
-    }
-  }
-
-  void _mostrarMensagem(String msg, Color cor) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: cor, duration: const Duration(seconds: 2)));
   }
 
   @override

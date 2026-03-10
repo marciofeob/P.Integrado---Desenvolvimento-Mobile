@@ -6,7 +6,7 @@ import '../../services/sap_service.dart';
 import '../auth/login_page.dart';
 import '../contador/contador_offline_page.dart';
 import '../config/api_config_page.dart';
-import '../consultas/item_search_page.dart'; 
+import '../consultas/item_search_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -50,7 +50,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _sincronizarComSAP() async {
     if (_contagensOffline.isEmpty) return;
     setState(() => _carregando = true);
-    
+
     try {
       final erro = await SapService.postInventoryCounting(_contagensOffline);
 
@@ -58,10 +58,12 @@ class _HomePageState extends State<HomePage> {
         await _tocarFeedback('sounds/check.mp3');
         await DatabaseHelper.instance.limparContagens();
         await _carregarDadosLocais();
-        
+
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sincronização concluída!'), backgroundColor: Colors.green),
+          const SnackBar(
+              content: Text('Sincronização concluída!'),
+              backgroundColor: Colors.green),
         );
       } else {
         await _tocarFeedback('sounds/fail.mp3', isError: true);
@@ -79,18 +81,84 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _exibirErroSap(String mensagem) {
-    bool isItemDuplicado = mensagem.contains("1470000497") || 
-                           mensagem.contains("already been added");
+  // MÉTODO DE ERRO - EXIBE JSON TÉCNICO + MENSAGEM AMIGÁVEL
+  void _exibirErroSap(String mensagemBruta) {
+    // 1. Identifica se é erro de duplicidade (Contagem aberta no SAP)
+    bool isItemDuplicado = mensagemBruta.contains("-1310") ||
+        mensagemBruta.contains("1470000497") ||
+        mensagemBruta.toLowerCase().contains("already");
+
+    // 2. Procura qual item da nossa lista local causou o erro na API
+    String itemEncontrado = "";
+    for (var contagem in _contagensOffline) {
+      String codigo = contagem['itemCode'].toString().trim();
+      if (mensagemBruta.toUpperCase().contains(codigo.toUpperCase())) {
+        itemEncontrado = codigo;
+        break;
+      }
+    }
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text(isItemDuplicado ? "Item Bloqueado" : "Erro no SAP"),
-        content: Text(mensagem),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Row(
+          children: [
+            Icon(isItemDuplicado ? Icons.warning_amber_rounded : Icons.error_outline,
+                color: isItemDuplicado ? Colors.orange : Colors.red),
+            const SizedBox(width: 10),
+            Text(isItemDuplicado ? "Conflito de Itens" : "Erro na API"),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Problema na sincronização:",
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(isItemDuplicado
+                  ? "O SAP informou que o item ${itemEncontrado.isNotEmpty ? itemEncontrado : 'selecionado'} já possui uma contagem aberta e não pode ser enviado novamente."
+                  : "Ocorreu um erro ao processar os dados no SAP."),
+              const SizedBox(height: 16),
+              const Text("O que fazer?",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              Text(itemEncontrado.isNotEmpty
+                  ? "• Remova o item $itemEncontrado (lixeira) e tente enviar novamente."
+                  : "• Verifique a lista de contagens ou contate o suporte TI."),
+              const SizedBox(height: 20),
+              const Divider(),
+              const Text("Dados brutos da API (Técnico):",
+                  style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(height: 5),
+              Container(
+                width: double.maxFinite,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: Colors.grey[300]!)),
+                child: Text(
+                  mensagemBruta,
+                  style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 10,
+                      color: Colors.blueGrey),
+                ),
+              ),
+            ],
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("ENTENDI")),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("ENTENDI",
+                  style: TextStyle(fontWeight: FontWeight.bold))),
         ],
       ),
     );
@@ -110,7 +178,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      drawer: _buildDrawer(), 
+      drawer: _buildDrawer(),
       body: Column(
         children: [
           _buildSummaryHeader(),
@@ -134,22 +202,31 @@ class _HomePageState extends State<HomePage> {
       ),
       child: Column(
         children: [
-          const Text("Itens aguardando envio", style: TextStyle(color: Colors.white70)),
+          const Text("Itens aguardando envio",
+              style: TextStyle(color: Colors.white70)),
           Text(
             "${_contagensOffline.length}",
-            style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+                color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
           SizedBox(
             width: 220,
             height: 45,
             child: ElevatedButton.icon(
-              onPressed: _carregando || _contagensOffline.isEmpty ? null : _sincronizarComSAP,
-              icon: _carregando 
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              onPressed: _carregando || _contagensOffline.isEmpty
+                  ? null
+                  : _sincronizarComSAP,
+              icon: _carregando
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.cloud_upload),
               label: const Text("SINCRONIZAR AGORA"),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green, foregroundColor: Colors.white),
             ),
           ),
         ],
@@ -167,7 +244,8 @@ class _HomePageState extends State<HomePage> {
               backgroundColor: Colors.white,
               child: Icon(Icons.person, color: Color(0xFF0A6ED1), size: 40),
             ),
-            accountName: const Text("Operador STOX", style: TextStyle(fontWeight: FontWeight.bold)),
+            accountName: const Text("Operador STOX",
+                style: TextStyle(fontWeight: FontWeight.bold)),
             accountEmail: const Text("Conectado ao SAP Business One"),
           ),
           Expanded(
@@ -180,7 +258,10 @@ class _HomePageState extends State<HomePage> {
                   title: const Text("Nova Contagem Offline"),
                   onTap: () {
                     Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ContadorOfflinePage()))
+                    Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const ContadorOfflinePage()))
                         .then((_) => _carregarDadosLocais());
                   },
                 ),
@@ -192,7 +273,10 @@ class _HomePageState extends State<HomePage> {
                   subtitle: const Text("Estoque, Detalhes e Etiquetas"),
                   onTap: () {
                     Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ItemSearchPage()));
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const ItemSearchPage()));
                   },
                 ),
               ],
@@ -204,7 +288,8 @@ class _HomePageState extends State<HomePage> {
             title: const Text("Configurações API"),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const ApiConfigPage()));
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const ApiConfigPage()));
             },
           ),
           ListTile(
@@ -213,7 +298,10 @@ class _HomePageState extends State<HomePage> {
             onTap: () async {
               await SapService.logout();
               if (!mounted) return;
-              Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LoginPage()), (route) => false);
+              Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                  (route) => false);
             },
           ),
           const SizedBox(height: 20),
@@ -237,9 +325,16 @@ class _HomePageState extends State<HomePage> {
           ),
           child: ListTile(
             leading: Icon(Icons.inventory_2, color: primaryColor),
-            title: Text("${item['itemCode']}", style: const TextStyle(fontWeight: FontWeight.bold)),
+            title: Text("${item['itemCode']}",
+                style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text("Quantidade: ${item['quantidade']}"),
-            trailing: const Icon(Icons.pending_actions, color: Colors.orange),
+            trailing: IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              onPressed: () async {
+                await DatabaseHelper.instance.excluirContagem(item['id']);
+                _carregarDadosLocais();
+              },
+            ),
           ),
         );
       },
@@ -253,7 +348,11 @@ class _HomePageState extends State<HomePage> {
         children: [
           Icon(Icons.cloud_done_outlined, size: 64, color: Colors.grey[300]),
           const SizedBox(height: 16),
-          const Text("Tudo em dia!", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const Text("Tudo em dia!",
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey)),
         ],
       ),
     );
@@ -268,7 +367,9 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Text(title, style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
+      child: Text(title,
+          style: const TextStyle(
+              color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
     );
   }
 }

@@ -10,7 +10,7 @@ class SapService {
   // CONFIGURAÇÃO DE CLIENTE (SSL) E URL
   // ==========================================
 
-  /// Cria um cliente HTTP que respeita a configuração de SSL do usuário
+  /// Cria um cliente que ignora certificados inválidos (comum em servidores SAP locais)
   static Future<http.Client> _getClient() async {
     final prefs = await SharedPreferences.getInstance();
     final permitirInseguro = prefs.getBool('sap_allow_untrusted') ?? true;
@@ -23,7 +23,7 @@ class SapService {
     return http.Client();
   }
 
-  /// Helper para garantir que a URL base termina com '/'
+  /// Garante que a URL termine com barra para evitar erros de concatenação
   static String _prepareUrl(String url) {
     if (url.isEmpty) return "";
     return url.endsWith('/') ? url : '$url/';
@@ -33,10 +33,7 @@ class SapService {
   // MÉTODOS DE AUTENTICAÇÃO
   // ==========================================
 
-  static Future<bool> login({
-    required String usuario,
-    required String senha,
-  }) async {
+  static Future<bool> login({required String usuario, required String senha}) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
     final company = prefs.getString('sap_company');
@@ -54,6 +51,7 @@ class SapService {
           "CompanyDB": company,
           "UserName": usuario,
           "Password": senha,
+          "Language": 29
         }),
       ).timeout(const Duration(seconds: 15));
 
@@ -65,6 +63,7 @@ class SapService {
           await prefs.setString('B1SESSION', sessionId);
         }
 
+        // Captura do ROUTEID para suporte a Load Balancer do SAP
         final rawCookie = response.headers['set-cookie'];
         if (rawCookie != null) {
           final routeIdMatch = RegExp(r'ROUTEID=([^;]+)').firstMatch(rawCookie);
@@ -104,7 +103,7 @@ class SapService {
   // MÉTODOS DE CONSULTA (ITEM)
   // ==========================================
 
-  /// NOVO MÉTODO: Busca itens por código ou nome (contém texto)
+  /// Busca rápida para a lista de pesquisa
   static Future<List<dynamic>> searchItems(String termo) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
@@ -117,15 +116,9 @@ class SapService {
       final client = await _getClient();
       final formattedUrl = _prepareUrl(baseUrl);
       
-      // Filtro OData: Busca exata pelo código OU se o nome contém o termo
-      // Nota: 'contains' diferencia maiúsculas/minúsculas dependendo da config do BD SAP, 
-      // mas geralmente funciona bem para buscas rápidas.
       final filter = "\$filter=ItemCode eq '$termo' or contains(ItemName, '$termo')";
       final select = "\$select=ItemCode,ItemName";
-      
       final fullUri = Uri.parse("${formattedUrl}Items?$filter&$select");
-
-      debugPrint("🔍 Buscando lista de itens em: $fullUri");
 
       final response = await client.get(
         fullUri,
@@ -138,16 +131,15 @@ class SapService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['value'] as List<dynamic>;
-      } else {
-        debugPrint("❌ Erro na busca SAP: ${response.body}");
-        return [];
       }
+      return [];
     } catch (e) {
       debugPrint("💥 Exceção ao pesquisar itens: $e");
       return [];
     }
   }
 
+  /// Busca todos os detalhes de um item específico (Estoque por armazém, etc)
   static Future<Map<String, dynamic>?> getDetailedItem(String itemCode) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
@@ -159,49 +151,37 @@ class SapService {
     try {
       final client = await _getClient();
       final formattedUrl = _prepareUrl(baseUrl);
-      
       final cleanCode = itemCode.trim().toUpperCase();
       
-      const fields = "ItemCode,ItemName,InventoryItem,SalesItem,PurchaseItem,InventoryUOM,PurchaseUnit,SalesUnit,SalesPackagingUnit,Frozen,ItemWarehouseInfoCollection";
-      
+      const fields = "ItemCode,ItemName,InventoryUOM,ItemWarehouseInfoCollection";
       final endpoint = "Items('$cleanCode')?\$select=$fields";
-      final fullUri = Uri.parse("$formattedUrl$endpoint");
       
-      debugPrint("🔍 Efetuando busca dinâmica em: $fullUri");
-
       final response = await client.get(
-        fullUri,
+        Uri.parse("$formattedUrl$endpoint"),
         headers: {
           "Cookie": "B1SESSION=$session; ROUTEID=$routeId",
           "Accept": "application/json",
         },
       ).timeout(const Duration(seconds: 12));
 
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
-      } else {
-        debugPrint("❌ Erro SAP (${response.statusCode}): ${response.body}");
-        return null;
-      }
+      if (response.statusCode == 200) return jsonDecode(response.body);
     } catch (e) {
       debugPrint("💥 Exceção na busca detalhada: $e");
-      return null;
     }
+    return null;
   }
 
   // ==========================================
   // MÉTODOS DE INVENTÁRIO (SINCRO)
   // ==========================================
 
-  static Future<String?> postInventoryCounting(
-    List<Map<String, dynamic>> contagens,
-  ) async {
+  static Future<String?> postInventoryCounting(List<Map<String, dynamic>> contagens) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
     final session = prefs.getString('B1SESSION');
     final routeId = prefs.getString('ROUTEID');
 
-    if (baseUrl == null || session == null) return "Sessão expirada ou configuração ausente.";
+    if (baseUrl == null || session == null) return "Sessão expirada. Faça login novamente.";
 
     final payload = {
       "CountDate": DateTime.now().toIso8601String().split('T')[0],
@@ -217,8 +197,7 @@ class SapService {
 
     try {
       final client = await _getClient();
-      final formattedUrl = _prepareUrl(baseUrl);
-      final fullUri = Uri.parse("${formattedUrl}InventoryCountings");
+      final fullUri = Uri.parse("${_prepareUrl(baseUrl)}InventoryCountings");
 
       final response = await client.post(
         fullUri,
@@ -231,20 +210,13 @@ class SapService {
       ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 201 || response.statusCode == 200) {
-        return null;
+        return null; // Sucesso
       } else {
-        try {
-          final errorBody = jsonDecode(response.body);
-          String sapMessage = errorBody['error']['message']['value'] ?? 
-                               errorBody['error']['message'].toString();
-          return "SAP diz: $sapMessage";
-        } catch (_) {
-          return "Erro servidor (${response.statusCode})";
-        }
+        // RETORNA O JSON BRUTO para a HomePage identificar o erro -1310 ou 1470000497
+        return response.body;
       }
     } catch (e) {
-      debugPrint("Exceção na sincronização: $e");
-      return "Falha de comunicação. Verifique o Wi-Fi.";
+      return "Falha de comunicação: $e";
     }
   }
 }

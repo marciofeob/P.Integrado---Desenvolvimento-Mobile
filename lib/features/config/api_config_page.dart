@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiConfigPage extends StatefulWidget {
@@ -12,7 +13,6 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
   final _urlController = TextEditingController();
   final _companyController = TextEditingController();
   bool _permitirSslInseguro = true;
-  final Color primaryColor = const Color(0xFF0A6ED1);
 
   @override
   void initState() {
@@ -37,17 +37,28 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
   }
 
   Future<void> _saveConfig() async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('sap_url', _urlController.text.trim());
     await prefs.setString('sap_company', _companyController.text.trim());
     await prefs.setBool('sap_allow_untrusted', _permitirSslInseguro);
 
     if (!mounted) return;
+    
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Configurações salvas!"),
-        backgroundColor: Colors.green,
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white),
+            SizedBox(width: 8),
+            Text("Configurações salvas com sucesso!", style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        backgroundColor: Colors.green.shade700,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
     Navigator.pop(context);
@@ -55,10 +66,11 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Configuração SAP"),
-        // O StoxTheme já cuida das cores, mas mantivemos aqui para garantir consistência
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -71,15 +83,16 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
               ),
               const SizedBox(height: 10),
-              const Text(
+              Text(
                 "Ajuste os endereços para sincronização com o SAP Business One.",
-                style: TextStyle(color: Colors.grey, fontSize: 14),
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
               ),
               const SizedBox(height: 30),
               
               TextField(
                 controller: _urlController,
                 keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
                   labelText: "Service Layer URL",
                   hintText: "https://servidor:50000/b1s/v1",
@@ -90,6 +103,7 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
               
               TextField(
                 controller: _companyController,
+                textInputAction: TextInputAction.done,
                 decoration: const InputDecoration(
                   labelText: "CompanyDB",
                   hintText: "SBODemoBR",
@@ -98,26 +112,25 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
               ),
               const SizedBox(height: 25),
               
-              // Container para o Switch para dar um visual de "Card"
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade200),
+                  border: Border.all(color: Colors.grey.shade300),
                 ),
                 child: SwitchListTile.adaptive(
                   title: const Text(
                     "Permitir SSL pré-assinado",
                     style: TextStyle(fontWeight: FontWeight.w500, fontSize: 15),
                   ),
-                  subtitle: const Text(
+                  subtitle: Text(
                     "Ative se o servidor SAP usar certificado auto-assinado (comum em dev/test).",
-                    style: TextStyle(fontSize: 12),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                   ),
                   value: _permitirSslInseguro,
-                  // ignore: deprecated_member_use
                   activeColor: primaryColor,
                   onChanged: (bool value) {
+                    HapticFeedback.selectionClick();
                     setState(() {
                       _permitirSslInseguro = value;
                     });
@@ -127,18 +140,11 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
               
               const SizedBox(height: 40),
               
-              SizedBox(
-                height: 55,
-                child: ElevatedButton(
-                  onPressed: _saveConfig,
-                  child: const Text(
-                    "SALVAR CONFIGURAÇÕES",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
+              ElevatedButton(
+                onPressed: _saveConfig,
+                child: const Text("SALVAR CONFIGURAÇÕES"),
               ),
               
-              // Padding extra no final para garantir que o botão não cole na barra de navegação
               const SizedBox(height: 20),
             ],
           ),

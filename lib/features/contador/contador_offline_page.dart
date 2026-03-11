@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
@@ -16,7 +17,6 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   final _codigoController = TextEditingController();
   final _quantidadeController = TextEditingController(text: '1');
   final _focusNodeCodigo = FocusNode();
-  final Color primaryColor = const Color(0xFF0A6ED1);
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   bool _scannerProcessando = false;
@@ -32,20 +32,23 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
 
   Future<void> _tocarFeedback(String assetPath, {bool isError = false}) async {
     try {
-      if (await Vibration.hasVibrator()) {
+      if (await Vibration.hasVibrator() ?? false) {
         if (isError) {
           Vibration.vibrate(pattern: [0, 200, 100, 300]);
         } else {
           Vibration.vibrate(duration: 100);
         }
+      } else {
+        isError ? HapticFeedback.vibrate() : HapticFeedback.lightImpact();
       }
       await _audioPlayer.play(AssetSource(assetPath));
     } catch (e) {
-      debugPrint("Erro ao reproduzir som: $e");
+      debugPrint("Erro ao reproduzir som ou vibrar: $e");
     }
   }
 
   void _ajustarQuantidade(double valor, {TextEditingController? controller}) {
+    HapticFeedback.selectionClick();
     final targetController = controller ?? _quantidadeController;
     double atual = double.tryParse(targetController.text.replaceAll(',', '.')) ?? 0;
     double novoValor = atual + valor;
@@ -58,19 +61,23 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   }
 
   Future<void> _exportarRelatorio() async {
+    HapticFeedback.lightImpact();
     try {
       final contagens = await DatabaseHelper.instance.buscarContagens();
       if (contagens.isEmpty) {
-        _mostrarMensagem('Nenhuma contagem para exportar!', Colors.orange);
+        _mostrarMensagem('Nenhuma contagem para exportar!', isWarning: true);
         return;
       }
       await ExportService.exportarContagensParaCSV(contagens);
+      _mostrarMensagem('Relatório exportado com sucesso!', isSuccess: true);
     } catch (e) {
-      _mostrarMensagem('Erro ao exportar: $e', Colors.red);
+      _mostrarMensagem('Erro ao exportar: $e', isError: true);
     }
   }
 
   void _abrirScanner() {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
     _scannerProcessando = false;
 
     showModalBottomSheet(
@@ -78,76 +85,109 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => LayoutBuilder(builder: (context, constraints) {
-        // Área de captura idêntica à ItemSearchPage
         final scanWindow = Rect.fromCenter(
           center: Offset(constraints.maxWidth / 2, 200),
-          width: 250,
-          height: 150,
+          width: 280,
+          height: 180,
         );
 
         return Container(
           height: MediaQuery.of(context).size.height * 0.85,
           decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
           child: SafeArea(
             child: Column(
               children: [
                 const SizedBox(height: 12),
-                Container(width: 40, height: 4, color: Colors.grey[300]),
+                Container(
+                  width: 48, 
+                  height: 6, 
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
                 AppBar(
-                  title: const Text('Escanear Código'),
+                  title: const Text('Escanear Código', style: TextStyle(fontWeight: FontWeight.bold)),
                   centerTitle: true,
                   backgroundColor: Colors.transparent,
+                  foregroundColor: Colors.black87,
                   elevation: 0,
                   automaticallyImplyLeading: false,
                   actions: [
                     IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context))
+                      icon: const Icon(Icons.close_rounded), 
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        Navigator.pop(context);
+                      },
+                    )
                   ],
                 ),
                 Expanded(
                   child: Stack(
                     children: [
-                      MobileScanner(
-                        scanWindow: scanWindow,
-                        onDetect: (capture) async {
-                          if (_scannerProcessando) return;
-                          final barcodes = capture.barcodes;
-                          if (barcodes.isNotEmpty) {
-                            _scannerProcessando = true;
-                            final code = barcodes.first.rawValue ?? "";
-                            await _tocarFeedback('sounds/beep.mp3');
-                            if (!mounted) return;
-                            _codigoController.text = code;
-                            // ignore: use_build_context_synchronously
-                            Navigator.of(context).pop();
-                            // Após fechar, foca na quantidade para agilizar
-                            _focusNodeCodigo.nextFocus();
-                          }
-                        },
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: MobileScanner(
+                          scanWindow: scanWindow,
+                          onDetect: (capture) async {
+                            if (_scannerProcessando) return;
+                            final barcodes = capture.barcodes;
+                            if (barcodes.isNotEmpty) {
+                              _scannerProcessando = true;
+                              final code = barcodes.first.rawValue ?? "";
+                              await _tocarFeedback('sounds/beep.mp3');
+                              
+                              if (!mounted) return;
+                              _codigoController.text = code;
+                              Navigator.of(context).pop();
+                              _focusNodeCodigo.nextFocus();
+                            }
+                          },
+                        ),
                       ),
-                      // Overlay de Máscara
-                      _buildScannerOverlay(scanWindow),
-                      // Borda Branca da área de leitura
+                      ColorFiltered(
+                        colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.7), BlendMode.srcOut),
+                        child: Stack(
+                          children: [
+                            Container(
+                              decoration: const BoxDecoration(color: Colors.black, backgroundBlendMode: BlendMode.dstOut),
+                            ),
+                            Center(
+                              child: Container(
+                                width: scanWindow.width,
+                                height: scanWindow.height,
+                                decoration: BoxDecoration(
+                                  color: Colors.red,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                       Center(
                         child: Container(
                           width: scanWindow.width,
                           height: scanWindow.height,
                           decoration: BoxDecoration(
-                            border: Border.all(color: Colors.white, width: 2),
-                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Theme.of(context).primaryColor, width: 3),
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Text("Alinhe o código de barras dentro do quadro",
-                      style: TextStyle(color: Colors.grey)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Text(
+                    "Alinhe o código de barras dentro do quadro", 
+                    style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                  ),
                 )
               ],
             ),
@@ -157,111 +197,121 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     );
   }
 
-  Widget _buildScannerOverlay(Rect scanWindow) {
-    return ColorFiltered(
-      colorFilter: ColorFilter.mode(
-          // ignore: deprecated_member_use
-          Colors.black.withOpacity(0.6), BlendMode.srcOut),
-      child: Stack(
-        children: [
-          Container(color: Colors.black),
-          Center(
-            child: Container(
-              width: scanWindow.width,
-              height: scanWindow.height,
-              decoration: BoxDecoration(
-                color: Colors.red, // Cor irrelevante devido ao BlendMode.srcOut
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _salvarContagem() async {
     final itemCode = _codigoController.text.trim();
     final quantidadeStr = _quantidadeController.text.trim();
 
     if (itemCode.isEmpty) {
       await _tocarFeedback('sounds/error_beep.mp3', isError: true);
-      _mostrarMensagem('O código é obrigatório!', Colors.orange);
+      _mostrarMensagem('O código do item é obrigatório.', isWarning: true);
       return;
     }
 
     final quantidade = double.tryParse(quantidadeStr.replaceAll(',', '.'));
     if (quantidade == null || quantidade <= 0) {
       await _tocarFeedback('sounds/error_beep.mp3', isError: true);
-      _mostrarMensagem('Quantidade inválida!', Colors.red);
+      _mostrarMensagem('Informe uma quantidade válida e maior que zero.', isError: true);
       return;
     }
 
     try {
       await DatabaseHelper.instance.inserirContagem(itemCode, quantidade);
-      _mostrarMensagem('Item $itemCode salvo!', Colors.green);
+      HapticFeedback.heavyImpact();
+      await _tocarFeedback('sounds/check.mp3');
+      _mostrarMensagem('Item $itemCode salvo com sucesso!', isSuccess: true);
+      
       _codigoController.clear();
       _quantidadeController.text = '1';
       setState(() {});
       _focusNodeCodigo.requestFocus();
     } catch (e) {
-      _mostrarMensagem('Erro: $e', Colors.red);
+      await _tocarFeedback('sounds/fail.mp3', isError: true);
+      _mostrarMensagem('Erro ao salvar: $e', isError: true);
     }
   }
 
-  // ... (Mantenha as funções _abrirEdicao, _confirmarExclusao e _mostrarMensagem iguais)
-
   void _abrirEdicao(Map<String, dynamic> item) {
+    HapticFeedback.selectionClick();
     final editController = TextEditingController(text: item['quantidade'].toString());
+    
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Editar: ${item['itemCode']}'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Editar: ${item['itemCode']}', style: const TextStyle(fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Ajuste a quantidade:'),
-              const SizedBox(height: 15),
-              Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.remove_circle, color: Colors.red),
-                    onPressed: () {
-                      _ajustarQuantidade(-1, controller: editController);
-                      setDialogState(() {});
-                    },
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: editController,
-                      textAlign: TextAlign.center,
-                      keyboardType: TextInputType.number,
-                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              Text('Ajuste a quantidade contada:', style: TextStyle(color: Colors.grey.shade600)),
+              const SizedBox(height: 20),
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 28),
+                      onPressed: () {
+                        _ajustarQuantidade(-1, controller: editController);
+                        setDialogState(() {});
+                      },
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add_circle, color: Colors.green),
-                    onPressed: () {
-                      _ajustarQuantidade(1, controller: editController);
-                      setDialogState(() {});
-                    },
-                  ),
-                ],
+                    Expanded(
+                      child: TextField(
+                        controller: editController,
+                        textAlign: TextAlign.center,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                        ),
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, color: Colors.green, size: 28),
+                      onPressed: () {
+                        _ajustarQuantidade(1, controller: editController);
+                        setDialogState(() {});
+                      },
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
+          actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('VOLTAR')),
+            TextButton(
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                Navigator.pop(context);
+              }, 
+              child: Text('CANCELAR', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold))
+            ),
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(100, 44),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
               onPressed: () async {
-                final novaQtd = double.tryParse(editController.text) ?? 0;
+                final novaQtd = double.tryParse(editController.text.replaceAll(',', '.')) ?? 0;
+                if (novaQtd <= 0) {
+                  _mostrarMensagem('Quantidade inválida.', isError: true);
+                  return;
+                }
+                
                 await DatabaseHelper.instance.atualizarContagem(item['id'], novaQtd);
                 if (mounted) {
-                  // ignore: use_build_context_synchronously
+                  HapticFeedback.heavyImpact();
                   Navigator.pop(context);
                   setState(() {});
-                  _mostrarMensagem('Atualizado!', Colors.green);
+                  _mostrarMensagem('Quantidade atualizada!', isSuccess: true);
                 }
               },
               child: const Text('SALVAR'),
@@ -273,96 +323,168 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   }
 
   void _confirmarExclusao(int id, String itemCode) {
+    HapticFeedback.vibrate();
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Excluir Registro'),
-        content: Text('Deseja remover a contagem do item $itemCode?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            SizedBox(width: 8),
+            Text('Excluir Registro', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text('Deseja realmente remover a contagem do item $itemCode? Esta ação não pode ser desfeita.'),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
           TextButton(
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              Navigator.pop(context);
+            }, 
+            child: Text('CANCELAR', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold))
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade600,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(100, 44),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             onPressed: () async {
               await DatabaseHelper.instance.excluirContagem(id);
               if (mounted) {
-                // ignore: use_build_context_synchronously
+                HapticFeedback.heavyImpact();
                 Navigator.pop(context);
                 setState(() {});
-                _mostrarMensagem('Registro removido', Colors.blueGrey);
+                _mostrarMensagem('Registro removido com sucesso.', isSuccess: true);
               }
             },
-            child: const Text('EXCLUIR', style: TextStyle(color: Colors.red)),
+            child: const Text('EXCLUIR'),
           ),
         ],
       ),
     );
   }
 
-  void _mostrarMensagem(String msg, Color cor) {
+  void _mostrarMensagem(String msg, {bool isError = false, bool isSuccess = false, bool isWarning = false}) {
+    Color bgColor = Colors.grey.shade800;
+    IconData iconData = Icons.info_outline;
+
+    if (isError) {
+      bgColor = Colors.red.shade700;
+      iconData = Icons.error_outline;
+      HapticFeedback.vibrate();
+    } else if (isSuccess) {
+      bgColor = Colors.green.shade700;
+      iconData = Icons.check_circle_outline;
+    } else if (isWarning) {
+      bgColor = Colors.orange.shade700;
+      iconData = Icons.warning_amber_rounded;
+    }
+
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: cor, duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(iconData, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white))),
+          ],
+        ),
+        backgroundColor: bgColor,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Contagem Offline'),
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
         actions: [
           IconButton(
             tooltip: 'Exportar CSV',
-            icon: const Icon(Icons.share),
+            icon: const Icon(Icons.share_rounded),
             onPressed: _exportarRelatorio,
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Modo Offline: Dados salvos localmente.',
-              style: TextStyle(color: Colors.grey, fontSize: 13),
-            ),
-            const SizedBox(height: 25),
-            TextField(
-              controller: _codigoController,
-              focusNode: _focusNodeCodigo,
-              decoration: InputDecoration(
-                labelText: 'Código do Item',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.qr_code_scanner),
-                  onPressed: _abrirScanner,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade100),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.wifi_off_rounded, color: theme.primaryColor),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Modo Offline: Os dados lidos nesta tela ficam salvos localmente no aparelho.',
+                        style: TextStyle(color: theme.primaryColor, fontSize: 13, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 25),
-            _buildQuantidadeSelector(),
-            const SizedBox(height: 30),
-            SizedBox(
-              height: 50,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primaryColor,
-                  foregroundColor: Colors.white,
+              const SizedBox(height: 24),
+              TextField(
+                controller: _codigoController,
+                focusNode: _focusNodeCodigo,
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(
+                  labelText: 'Código do Item',
+                  prefixIcon: const Icon(Icons.inventory_2_outlined),
+                  suffixIcon: IconButton(
+                    icon: Icon(Icons.qr_code_scanner_rounded, color: theme.primaryColor),
+                    onPressed: _abrirScanner,
+                  ),
                 ),
+              ),
+              const SizedBox(height: 20),
+              _buildQuantidadeSelector(),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
                 onPressed: _salvarContagem,
-                child: const Text('SALVAR CONTAGEM'),
+                icon: const Icon(Icons.save_rounded),
+                label: const Text('SALVAR CONTAGEM'),
               ),
-            ),
-            const SizedBox(height: 40),
-            const Text(
-              'Histórico Recente',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
-            ),
-            const Divider(),
-            _buildListaContagens(),
-          ],
+              const SizedBox(height: 40),
+              Row(
+                children: [
+                  const Icon(Icons.history_rounded, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Histórico Recente',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+                  ),
+                  const Spacer(),
+                  Text(
+                    'Segure para excluir',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _buildListaContagens(),
+            ],
+          ),
         ),
       ),
     );
@@ -370,29 +492,44 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
 
   Widget _buildQuantidadeSelector() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey),
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.white,
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
-            onPressed: () => _ajustarQuantidade(-1),
+          InkWell(
+            onTap: () => _ajustarQuantidade(-1),
+            borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), bottomLeft: Radius.circular(12)),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              child: Icon(Icons.remove_rounded, color: Colors.red.shade600, size: 28),
+            ),
           ),
           Expanded(
             child: TextField(
               controller: _quantidadeController,
               textAlign: TextAlign.center,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(border: InputBorder.none),
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                fillColor: Colors.transparent,
+                filled: false,
+                contentPadding: EdgeInsets.zero,
+              ),
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline, color: Colors.green),
-            onPressed: () => _ajustarQuantidade(1),
+          InkWell(
+            onTap: () => _ajustarQuantidade(1),
+            borderRadius: const BorderRadius.only(topRight: Radius.circular(12), bottomRight: Radius.circular(12)),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              child: Icon(Icons.add_rounded, color: Colors.green.shade600, size: 28),
+            ),
           ),
         ],
       ),
@@ -403,21 +540,68 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: DatabaseHelper.instance.buscarContagens(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.isEmpty) return const Text('Nenhuma contagem.');
-        final itens = snapshot.data!.reversed.toList();
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
+        }
+        
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200, style: BorderStyle.solid),
+            ),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(Icons.inbox_rounded, size: 48, color: Colors.grey.shade400),
+                  const SizedBox(height: 12),
+                  Text('Nenhuma contagem registrada.', style: TextStyle(color: Colors.grey.shade600)),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final itens = snapshot.data!.toList();
+
         return ListView.separated(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: itens.length > 10 ? 10 : itens.length,
-          separatorBuilder: (_, __) => const Divider(),
+          itemCount: itens.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final item = itens[index];
-            return ListTile(
-              title: Text(item['itemCode'], style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('Qtd: ${item['quantidade']}'),
-              trailing: const Icon(Icons.edit_note, color: Colors.blueGrey),
-              onTap: () => _abrirEdicao(item),
-              onLongPress: () => _confirmarExclusao(item['id'], item['itemCode']),
+            final syncStatus = item['syncStatus'] ?? 0;
+            
+            return Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.grey.shade300),
+              ),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: CircleAvatar(
+                  backgroundColor: syncStatus == 1 ? Colors.green.shade50 : Colors.orange.shade50,
+                  child: Icon(
+                    syncStatus == 1 ? Icons.cloud_done_rounded : Icons.cloud_upload_rounded, 
+                    color: syncStatus == 1 ? Colors.green : Colors.orange,
+                    size: 20,
+                  ),
+                ),
+                title: Text(item['itemCode'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('Quantidade: ${item['quantidade']}', style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                ),
+                trailing: IconButton(
+                  icon: Icon(Icons.edit_rounded, color: Theme.of(context).primaryColor),
+                  onPressed: () => _abrirEdicao(item),
+                ),
+                onLongPress: () => _confirmarExclusao(item['id'], item['itemCode']),
+              ),
             );
           },
         );

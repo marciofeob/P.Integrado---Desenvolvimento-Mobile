@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/sap_service.dart';
 import '../config/api_config_page.dart';
@@ -17,7 +18,6 @@ class _LoginPageState extends State<LoginPage> {
   final _senhaController = TextEditingController();
   bool _ocultarSenha = true;
   bool _carregando = false;
-  final Color primaryColor = const Color(0xFF0A6ED1);
 
   @override
   void dispose() {
@@ -26,12 +26,18 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void _limparCampos() => setState(() {
-    _usuarioController.clear();
-    _senhaController.clear();
-  });
+  void _limparCampos() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _usuarioController.clear();
+      _senhaController.clear();
+    });
+  }
 
   Future<void> _login() async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus(); // Recolhe o teclado ao tentar logar
+
     final prefs = await SharedPreferences.getInstance();
     final sapUrl = prefs.getString('sap_url');
     final companyDb = prefs.getString('sap_company');
@@ -58,6 +64,8 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
+      HapticFeedback.heavyImpact(); // Confirmação de sucesso
+
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -71,32 +79,41 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _mostrarErro(String msg) {
+    HapticFeedback.vibrate(); // Feedback tátil para erro
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(backgroundColor: Colors.red, content: Text(msg), behavior: SnackBarBehavior.floating),
+      SnackBar(
+        backgroundColor: Colors.red.shade700,
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold))),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Pegamos o tamanho da tela para cálculos de responsividade
     final size = MediaQuery.of(context).size;
+    final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      // SafeArea no topo para o Scaffold inteiro
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
             return SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24),
-              // ConstrainedBox garante que a Column ocupe pelo menos a altura da tela
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: IntrinsicHeight(
                   child: Column(
                     mainAxisSize: MainAxisSize.max,
                     children: [
-                      SizedBox(height: size.height * 0.08), // Espaçamento proporcional
+                      SizedBox(height: size.height * 0.08),
                       Image.asset("assets/images/Logo_colorida.png", height: 80),
                       const SizedBox(height: 24),
                       const Text(
@@ -104,15 +121,15 @@ class _LoginPageState extends State<LoginPage> {
                         style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         "Informe seu usuário e senha do SAP",
-                        style: TextStyle(color: Colors.grey),
+                        style: TextStyle(color: Colors.grey.shade600),
                       ),
                       const SizedBox(height: 40),
                       
-                      // Campos de Texto
                       TextField(
                         controller: _usuarioController,
+                        textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
                           labelText: "Usuário",
                           prefixIcon: Icon(Icons.person_outline),
@@ -122,12 +139,17 @@ class _LoginPageState extends State<LoginPage> {
                       TextField(
                         controller: _senhaController,
                         obscureText: _ocultarSenha,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _login(),
                         decoration: InputDecoration(
                           labelText: "Senha",
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             icon: Icon(_ocultarSenha ? Icons.visibility_off : Icons.visibility),
-                            onPressed: () => setState(() => _ocultarSenha = !_ocultarSenha),
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              setState(() => _ocultarSenha = !_ocultarSenha);
+                            },
                           ),
                         ),
                       ),
@@ -136,55 +158,64 @@ class _LoginPageState extends State<LoginPage> {
                         alignment: Alignment.centerRight,
                         child: TextButton(
                           onPressed: _limparCampos,
-                          child: const Text("Limpar", style: TextStyle(color: Colors.grey)),
+                          child: Text("Limpar", style: TextStyle(color: Colors.grey.shade600)),
                         ),
                       ),
                       
                       const SizedBox(height: 20),
 
-                      // Botão Principal (Ação mais importante)
-                      SizedBox(
-                        width: double.infinity,
-                        height: 55,
-                        child: ElevatedButton(
-                          onPressed: _carregando ? null : _login,
-                          child: _carregando
-                              ? const CircularProgressIndicator(color: Colors.white)
-                              : const Text("ENTRAR E SINCRONIZAR"),
-                        ),
+                      ElevatedButton(
+                        onPressed: _carregando ? null : _login,
+                        child: _carregando
+                            ? const SizedBox(
+                                height: 24,
+                                width: 24,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                              )
+                            : const Text("ENTRAR E SINCRONIZAR"),
                       ),
                       
                       const SizedBox(height: 16),
 
-                      // Botão Offline
-                      SizedBox(
-                        width: double.infinity,
-                        height: 55,
-                        child: OutlinedButton.icon(
-                          onPressed: () => Navigator.push(
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          HapticFeedback.lightImpact();
+                          Navigator.push(
                             context,
                             MaterialPageRoute(builder: (_) => const ContadorOfflinePage()),
-                          ),
-                          icon: const Icon(Icons.qr_code_scanner),
-                          label: const Text("MODO CONTADOR OFFLINE"),
+                          );
+                        },
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 54), // Padronizado com o ElevatedButton do tema
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          side: BorderSide(color: theme.primaryColor, width: 1.5),
+                          foregroundColor: theme.primaryColor,
+                        ),
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text(
+                          "MODO CONTADOR OFFLINE",
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                       
-                      const Spacer(), // Empurra os itens abaixo para o rodapé
+                      const Spacer(),
                       
                       const SizedBox(height: 24),
                       TextButton.icon(
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const ApiConfigPage()),
-                        ),
-                        icon: const Icon(Icons.settings, color: Colors.grey),
-                        label: const Text("Configurações da API", style: TextStyle(color: Colors.grey)),
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ApiConfigPage()),
+                          );
+                        },
+                        icon: Icon(Icons.settings, color: Colors.grey.shade600),
+                        label: Text("Configurações da API", style: TextStyle(color: Colors.grey.shade600)),
                       ),
                       
                       const SizedBox(height: 20),
                       Image.asset("assets/images/sap-logo.png", height: 20),
-                      const SizedBox(height: 16), // Padding extra para evitar toque na barra de navegação
+                      const SizedBox(height: 24),
                     ],
                   ),
                 ),

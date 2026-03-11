@@ -28,15 +28,22 @@ class DatabaseHelper {
     const idType = 'INTEGER PRIMARY KEY AUTOINCREMENT';
     const textType = 'TEXT NOT NULL';
     const realType = 'REAL NOT NULL';
+    const intType = 'INTEGER NOT NULL';
 
+    // Criação da tabela com a coluna de syncStatus (0: Pendente, 1: Sincronizado, 2: Erro)
     await db.execute('''
       CREATE TABLE contagens (
         id $idType,
         itemCode $textType,
         quantidade $realType,
-        dataHora $textType
+        dataHora $textType,
+        syncStatus $intType DEFAULT 0
       )
     ''');
+
+    // Criação de índices para otimizar buscas em tabelas volumosas
+    await db.execute('CREATE INDEX idx_itemCode ON contagens (itemCode)');
+    await db.execute('CREATE INDEX idx_syncStatus ON contagens (syncStatus)');
   }
 
   // --- MÉTODOS DE OPERAÇÃO ---
@@ -47,6 +54,7 @@ class DatabaseHelper {
       'itemCode': itemCode.toUpperCase(), // Garante consistência no código
       'quantidade': quantidade,
       'dataHora': DateTime.now().toIso8601String(),
+      'syncStatus': 0, // 0 = Pendente de envio para o SAP
     };
     return await db.insert('contagens', data);
   }
@@ -58,6 +66,19 @@ class DatabaseHelper {
       {
         'quantidade': novaQuantidade,
         'dataHora': DateTime.now().toIso8601String(), // Atualiza a hora da edição
+        'syncStatus': 0, // Retorna para pendente, pois o valor foi alterado
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> atualizarStatusSincronizacao(int id, int novoStatus) async {
+    final db = await instance.database;
+    return await db.update(
+      'contagens',
+      {
+        'syncStatus': novoStatus,
       },
       where: 'id = ?',
       whereArgs: [id],
@@ -79,11 +100,22 @@ class DatabaseHelper {
     return await db.query('contagens', orderBy: 'dataHora DESC');
   }
 
+  Future<List<Map<String, dynamic>>> buscarContagensPendentes() async {
+    final db = await instance.database;
+    // Busca apenas as contagens que não foram enviadas ou deram erro
+    return await db.query(
+      'contagens',
+      where: 'syncStatus IN (?, ?)',
+      whereArgs: [0, 2],
+      orderBy: 'dataHora ASC', // FIFO: envia as mais antigas primeiro
+    );
+  }
+
   Future<double> calcularTotalPorItem(String itemCode) async {
     final db = await instance.database;
     final result = await db.rawQuery(
       'SELECT SUM(quantidade) as total FROM contagens WHERE itemCode = ?',
-      [itemCode]
+      [itemCode.toUpperCase()]
     );
     // Tratamento para garantir que retorne double mesmo se for nulo
     final total = result.first['total'];
@@ -94,6 +126,16 @@ class DatabaseHelper {
   Future<void> limparContagens() async {
     final db = await instance.database;
     await db.delete('contagens');
+  }
+
+  Future<void> limparContagensSincronizadas() async {
+    final db = await instance.database;
+    // Exclui apenas as contagens que já foram confirmadas pelo SAP (status 1)
+    await db.delete(
+      'contagens',
+      where: 'syncStatus = ?',
+      whereArgs: [1],
+    );
   }
 
   Future close() async {

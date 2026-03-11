@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class StoxTheme {
   static const Color sapBlue = Color(0xFF0A6ED1);
@@ -66,6 +67,7 @@ class StoxTheme {
         foregroundColor: Colors.white,
         centerTitle: true,
         elevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle.light, // Garante legibilidade da barra de status
       ),
     );
   }

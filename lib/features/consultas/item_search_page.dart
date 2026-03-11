@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
@@ -21,7 +22,6 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   
   bool _loading = false;
   bool _scannerProcessando = false;
-  final Color primaryColor = const Color(0xFF0A6ED1);
 
   @override
   void dispose() {
@@ -32,22 +32,31 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
 
   Future<void> _tocarFeedback(String assetPath, {bool isError = false}) async {
     try {
-      if (await Vibration.hasVibrator()) {
+      if (await Vibration.hasVibrator() ?? false) {
         if (isError) {
           Vibration.vibrate(pattern: [0, 200, 100, 300]);
         } else {
           Vibration.vibrate(duration: 100);
         }
+      } else {
+        // Fallback caso não tenha motor de vibração customizável
+        isError ? HapticFeedback.vibrate() : HapticFeedback.lightImpact();
       }
       await _audioPlayer.play(AssetSource(assetPath));
     } catch (e) {
-      debugPrint("Erro ao reproduzir som: $e");
+      debugPrint("Erro ao reproduzir som ou vibrar: $e");
     }
   }
 
   Future<void> _buscar() async {
     final termo = _searchController.text.trim();
-    if (termo.isEmpty) return;
+    if (termo.isEmpty) {
+      HapticFeedback.selectionClick();
+      return;
+    }
+
+    FocusScope.of(context).unfocus(); // Recolhe o teclado
+    HapticFeedback.lightImpact();
 
     setState(() {
       _loading = true;
@@ -65,13 +74,14 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
             _carregarDetalhes(results.first['ItemCode']);
           } else {
             _searchResults = results;
+            if (results.isNotEmpty) HapticFeedback.selectionClick();
           }
         });
       }
 
       if (results.isEmpty) {
         await _tocarFeedback('sounds/error_beep.mp3', isError: true);
-        _mostrarAviso("Nenhum item encontrado.");
+        _mostrarAviso("Nenhum item encontrado para '$termo'.");
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
@@ -89,26 +99,52 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
           _searchResults = [];
           _loading = false;
         });
+        HapticFeedback.lightImpact();
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
-      _mostrarErro("Erro ao carregar detalhes.");
+      _mostrarErro("Erro ao carregar detalhes do item.");
     }
   }
 
   void _mostrarErro(String msg) {
+    HapticFeedback.vibrate();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold))),
+          ],
+        ),
+        backgroundColor: Colors.red.shade700,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
     );
   }
 
   void _mostrarAviso(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.orange, behavior: SnackBarBehavior.floating),
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold))),
+          ],
+        ),
+        backgroundColor: Colors.orange.shade700,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
     );
   }
 
   void _abrirScanner() {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
     _scannerProcessando = false;
 
     showModalBottomSheet(
@@ -116,67 +152,84 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => LayoutBuilder(builder: (context, constraints) {
-        // Adaptamos o tamanho do scanWindow dinamicamente
         final scanWindow = Rect.fromCenter(
           center: Offset(constraints.maxWidth / 2, 200),
-          width: 250,
-          height: 150,
+          width: 280,
+          height: 180,
         );
 
         return Container(
           height: MediaQuery.of(context).size.height * 0.85,
           decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-          child: SafeArea( // Crucial para não cortar em celulares com gestos
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
             child: Column(
               children: [
                 const SizedBox(height: 12),
-                Container(width: 40, height: 4, color: Colors.grey[300]),
+                Container(
+                  width: 48, 
+                  height: 6, 
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
                 AppBar(
-                  title: const Text('Escanear Código'),
+                  title: const Text('Escanear Código', style: TextStyle(fontWeight: FontWeight.bold)),
                   centerTitle: true,
                   backgroundColor: Colors.transparent,
+                  foregroundColor: Colors.black87,
                   elevation: 0,
                   automaticallyImplyLeading: false,
                   actions: [
-                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded), 
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        Navigator.pop(context);
+                      },
+                    )
                   ],
                 ),
                 Expanded(
                   child: Stack(
                     children: [
-                      MobileScanner(
-                        scanWindow: scanWindow,
-                        onDetect: (capture) async {
-                          if (_scannerProcessando) return;
-                          final barcodes = capture.barcodes;
-                          if (barcodes.isNotEmpty) {
-                            _scannerProcessando = true;
-                            final code = barcodes.first.rawValue ?? "";
-                            await _tocarFeedback('sounds/beep.mp3');
-                            if (!mounted) return;
-                            _searchController.text = code;
-                            // ignore: use_build_context_synchronously
-                            Navigator.of(context).pop();
-                            _buscar();
-                          }
-                        },
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: MobileScanner(
+                          scanWindow: scanWindow,
+                          onDetect: (capture) async {
+                            if (_scannerProcessando) return;
+                            final barcodes = capture.barcodes;
+                            if (barcodes.isNotEmpty) {
+                              _scannerProcessando = true;
+                              final code = barcodes.first.rawValue ?? "";
+                              await _tocarFeedback('sounds/beep.mp3');
+                              
+                              if (!mounted) return;
+                              _searchController.text = code;
+                              Navigator.of(context).pop();
+                              _buscar();
+                            }
+                          },
+                        ),
                       ),
-                      // Overlay de Scanner com máscara
                       ColorFiltered(
-                        // ignore: deprecated_member_use
-                        colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.6), BlendMode.srcOut),
+                        colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.7), BlendMode.srcOut),
                         child: Stack(
                           children: [
-                            Container(color: Colors.black),
+                            Container(
+                              decoration: const BoxDecoration(color: Colors.black, backgroundBlendMode: BlendMode.dstOut),
+                            ),
                             Center(
                               child: Container(
                                 width: scanWindow.width,
                                 height: scanWindow.height,
                                 decoration: BoxDecoration(
-                                  color: Colors.red,
-                                  borderRadius: BorderRadius.circular(12),
+                                  color: Colors.red, // Parte vazada pelo SRC_OUT
+                                  borderRadius: BorderRadius.circular(16),
                                 ),
                               ),
                             ),
@@ -188,17 +241,20 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                           width: scanWindow.width,
                           height: scanWindow.height,
                           decoration: BoxDecoration(
-                            border: Border.all(color: Colors.white, width: 2),
-                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Theme.of(context).primaryColor, width: 3),
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Text("Alinhe o código de barras dentro do quadro", style: TextStyle(color: Colors.grey)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Text(
+                    "Alinhe o código de barras dentro do quadro", 
+                    style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                  ),
                 )
               ],
             ),
@@ -211,8 +267,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Consultar Item")),
-      body: SafeArea( // Protege o corpo do app contra a barra inferior do Android
+      appBar: AppBar(
+        title: const Text("Consultar Item"),
+      ),
+      body: SafeArea(
         child: Column(
           children: [
             _buildSearchBar(),
@@ -221,10 +279,19 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
             if (!_loading && _searchResults.isNotEmpty) _buildSearchSuggestions(),
             if (!_loading && _itemData != null) _buildResultList(),
             if (!_loading && _itemData == null && _searchResults.isEmpty)
-              const Expanded(
+              Expanded(
                 child: Center(
-                  child: Text("Busque por código ou nome para começar.", 
-                    style: TextStyle(color: Colors.grey)),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.search_rounded, size: 64, color: Colors.grey.shade300),
+                      const SizedBox(height: 16),
+                      Text(
+                        "Busque por código ou nome para começar.", 
+                        style: TextStyle(color: Colors.grey.shade500, fontSize: 16),
+                      ),
+                    ],
+                  ),
                 ),
               ),
           ],
@@ -234,6 +301,8 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   }
 
   Widget _buildSearchBar() {
+    final theme = Theme.of(context);
+    
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Row(
@@ -244,26 +313,26 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _buscar(),
               decoration: InputDecoration(
-                hintText: "Código ou Nome",
+                hintText: "Código ou Nome do Item",
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: IconButton(
-                  icon: const Icon(Icons.qr_code_scanner, color: Color(0xFF0A6ED1)),
+                  icon: Icon(Icons.qr_code_scanner_rounded, color: theme.primaryColor),
                   onPressed: _abrirScanner,
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           SizedBox(
-            height: 54,
-            width: 54,
+            height: 56,
+            width: 56,
             child: ElevatedButton(
               onPressed: _buscar,
               style: ElevatedButton.styleFrom(
                 padding: EdgeInsets.zero,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: const Icon(Icons.arrow_forward),
+              child: const Icon(Icons.arrow_forward_rounded, size: 28),
             ),
           ),
         ],
@@ -274,7 +343,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   Widget _buildSearchSuggestions() {
     return Expanded(
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 80), // Padding extra no fundo
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
         itemCount: _searchResults.length,
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
@@ -283,13 +352,20 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.grey.shade200),
+              side: BorderSide(color: Colors.grey.shade300),
             ),
             child: ListTile(
-              title: Text(item['ItemName'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(item['ItemCode'] ?? ''),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-              onTap: () => _carregarDetalhes(item['ItemCode']),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              title: Text(item['ItemName'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(item['ItemCode'] ?? '', style: TextStyle(color: Colors.grey.shade600)),
+              ),
+              trailing: Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Theme.of(context).primaryColor),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                _carregarDetalhes(item['ItemCode']);
+              },
             ),
           );
         },
@@ -300,17 +376,19 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   Widget _buildResultList() {
     return Expanded(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 100), // Garante que o scroll passe da barra do Android
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
         children: [
           _buildHeaderCard(),
           _buildStatusFlags(),
           _buildSectionTitle("Estoque por Depósito"),
           _buildWarehouseInfo(),
           _buildSectionTitle("Informações Adicionais"),
-          _buildDetailRow("Unidade", _itemData!['InventoryUOM'] ?? "UN"),
-          _buildDetailRow("Item Bloqueado",
-              _itemData!['Frozen'] == "tYES" ? "SIM" : "NÃO",
-              isAlert: _itemData!['Frozen'] == "tYES"),
+          _buildDetailRow("Unidade de Medida", _itemData!['InventoryUOM'] ?? "UN"),
+          _buildDetailRow(
+            "Item Bloqueado",
+            _itemData!['Frozen'] == "tYES" ? "SIM" : "NÃO",
+            isAlert: _itemData!['Frozen'] == "tYES",
+          ),
           const SizedBox(height: 30),
         ],
       ),
@@ -318,20 +396,28 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   }
 
   Widget _buildHeaderCard() {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: primaryColor,
-        borderRadius: BorderRadius.circular(15),
+        color: theme.primaryColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: theme.primaryColor.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_itemData!['ItemCode'] ?? '',
-              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 5),
-          Text(_itemData!['ItemName'] ?? '',
-              style: const TextStyle(color: Colors.white70, fontSize: 14)),
+          Text(
+            _itemData!['ItemCode'] ?? '',
+            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 1),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _itemData!['ItemName'] ?? '',
+            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+          ),
         ],
       ),
     );
@@ -340,10 +426,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   Widget _buildStatusFlags() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 20),
-      child: Wrap( // Usei Wrap em vez de Row para evitar estouro em telas estreitas
-        spacing: 10,
-        runSpacing: 10,
-        alignment: WrapAlignment.center,
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        alignment: WrapAlignment.start,
         children: [
           _statusChip("Estoque", _itemData!['InventoryItem'] == 'tYES'),
           _statusChip("Venda", _itemData!['SalesItem'] == 'tYES'),
@@ -357,15 +443,29 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: active ? Colors.green.shade50 : Colors.grey.shade50,
+        color: active ? Colors.green.shade50 : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: active ? Colors.green : Colors.grey.shade300),
+        border: Border.all(color: active ? Colors.green.shade400 : Colors.grey.shade300, width: 1.5),
       ),
-      child: Text(label,
-          style: TextStyle(
-            color: active ? Colors.green.shade700 : Colors.grey.shade600,
-            fontWeight: FontWeight.bold,
-            fontSize: 12)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            active ? Icons.check_circle_rounded : Icons.cancel_rounded, 
+            size: 16, 
+            color: active ? Colors.green.shade600 : Colors.grey.shade500
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: active ? Colors.green.shade700 : Colors.grey.shade600,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            )
+          ),
+        ],
+      ),
     );
   }
 
@@ -374,10 +474,15 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     final warehouses = list.where((wh) => (wh['InStock'] ?? 0) > 0).toList();
 
     if (warehouses.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Text("Sem estoque nos depósitos."),
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: const Center(
+          child: Text("Sem estoque disponível nos depósitos.", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
         ),
       );
     }
@@ -386,21 +491,30 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       children: warehouses.map((wh) {
         return Card(
           elevation: 0,
-          margin: const EdgeInsets.only(bottom: 10),
+          margin: const EdgeInsets.only(bottom: 12),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.grey.shade200)),
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.grey.shade300),
+          ),
           child: ListTile(
-            leading: const CircleAvatar(
-              backgroundColor: Color(0xFFF0F4F8),
-              child: Icon(Icons.warehouse_outlined, color: Colors.blueGrey, size: 20),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: CircleAvatar(
+              backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+              radius: 24,
+              child: Icon(Icons.warehouse_rounded, color: Theme.of(context).primaryColor, size: 24),
             ),
-            title: Text("Depósito ${wh['WarehouseCode']}"),
-            subtitle: Text("Disponível: ${wh['InStock']}"),
+            title: Text("Depósito ${wh['WarehouseCode']}", style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                "Disponível: ${wh['InStock']}", 
+                style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)
+              ),
+            ),
             trailing: IconButton(
-              icon: const Icon(Icons.print_outlined, color: Colors.blue),
+              icon: Icon(Icons.print_rounded, color: Theme.of(context).primaryColor),
               onPressed: () {
-                // Navegação para a página de etiqueta
+                HapticFeedback.lightImpact();
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -419,24 +533,40 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   }
 
   Widget _buildSectionTitle(String title) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 24, bottom: 12),
-      child: Text(title,
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: primaryColor)),
+      padding: const EdgeInsets.only(top: 24, bottom: 16),
+      child: Row(
+        children: [
+          Container(width: 4, height: 16, color: theme.primaryColor),
+          const SizedBox(width: 8),
+          Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.primaryColor)),
+        ],
+      ),
     );
   }
 
   Widget _buildDetailRow(String label, String value, {bool isAlert = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isAlert ? Colors.red.shade50 : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: isAlert ? Colors.red.shade200 : Colors.grey.shade200),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(value,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isAlert ? Colors.red : Colors.black87)),
+          Text(label, style: TextStyle(color: isAlert ? Colors.red.shade700 : Colors.grey.shade700, fontWeight: FontWeight.w500)),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: isAlert ? Colors.red.shade700 : Colors.black87,
+            )
+          ),
         ],
       ),
     );

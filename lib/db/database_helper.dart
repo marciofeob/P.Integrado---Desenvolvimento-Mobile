@@ -39,30 +39,31 @@ class DatabaseHelper {
     ''');
   }
 
+  // --- MÉTODOS DE OPERAÇÃO ---
+
   Future<int> inserirContagem(String itemCode, double quantidade) async {
     final db = await instance.database;
     final data = {
-      'itemCode': itemCode,
+      'itemCode': itemCode.toUpperCase(), // Garante consistência no código
       'quantidade': quantidade,
       'dataHora': DateTime.now().toIso8601String(),
     };
     return await db.insert('contagens', data);
   }
 
-  // --- NOVOS MÉTODOS ADICIONADOS ABAIXO ---
-
-  // 1. Método para ATUALIZAR (Editar)
   Future<int> atualizarContagem(int id, double novaQuantidade) async {
     final db = await instance.database;
     return await db.update(
       'contagens',
-      {'quantidade': novaQuantidade},
-      where: 'id = ?', // Filtro por ID para não atualizar a tabela toda
+      {
+        'quantidade': novaQuantidade,
+        'dataHora': DateTime.now().toIso8601String(), // Atualiza a hora da edição
+      },
+      where: 'id = ?',
       whereArgs: [id],
     );
   }
 
-  // 2. Método para EXCLUIR um item específico
   Future<int> excluirContagem(int id) async {
     final db = await instance.database;
     return await db.delete(
@@ -72,21 +73,22 @@ class DatabaseHelper {
     );
   }
 
-  // 3. Método para somar tudo (Útil para o resumo do SAP depois)
+  Future<List<Map<String, dynamic>>> buscarContagens() async {
+    final db = await instance.database;
+    // Retorna ordenado pela data mais recente
+    return await db.query('contagens', orderBy: 'dataHora DESC');
+  }
+
   Future<double> calcularTotalPorItem(String itemCode) async {
     final db = await instance.database;
     final result = await db.rawQuery(
       'SELECT SUM(quantidade) as total FROM contagens WHERE itemCode = ?',
       [itemCode]
     );
-    return result.first['total'] as double? ?? 0.0;
-  }
-
-  // --- MÉTODOS QUE VOCÊ JÁ TINHA ---
-
-  Future<List<Map<String, dynamic>>> buscarContagens() async {
-    final db = await instance.database;
-    return await db.query('contagens', orderBy: 'dataHora DESC');
+    // Tratamento para garantir que retorne double mesmo se for nulo
+    final total = result.first['total'];
+    if (total == null) return 0.0;
+    return (total as num).toDouble();
   }
 
   Future<void> limparContagens() async {
@@ -96,6 +98,7 @@ class DatabaseHelper {
 
   Future close() async {
     final db = await instance.database;
-    db.close();
+    _database = null; // Limpa a referência para segurança
+    await db.close();
   }
 }

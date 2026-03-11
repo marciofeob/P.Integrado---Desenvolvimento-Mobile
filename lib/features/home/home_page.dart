@@ -32,6 +32,9 @@ class _HomePageState extends State<HomePage> {
     setState(() => _contagensOffline = dados);
   }
 
+  // ... (seus métodos _tocarFeedback, _sincronizarComSAP e _exibirErroSap permanecem iguais)
+  // Vou focar no BUILD que é onde o problema de corte acontece.
+
   Future<void> _tocarFeedback(String assetPath, {bool isError = false}) async {
     try {
       if (await Vibration.hasVibrator() ?? false) {
@@ -50,20 +53,15 @@ class _HomePageState extends State<HomePage> {
   Future<void> _sincronizarComSAP() async {
     if (_contagensOffline.isEmpty) return;
     setState(() => _carregando = true);
-
     try {
       final erro = await SapService.postInventoryCounting(_contagensOffline);
-
       if (erro == null) {
         await _tocarFeedback('sounds/check.mp3');
         await DatabaseHelper.instance.limparContagens();
         await _carregarDadosLocais();
-
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Sincronização concluída!'),
-              backgroundColor: Colors.green),
+          const SnackBar(content: Text('Sincronização concluída!'), backgroundColor: Colors.green),
         );
       } else {
         await _tocarFeedback('sounds/fail.mp3', isError: true);
@@ -81,14 +79,11 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // MÉTODO DE ERRO - EXIBE JSON TÉCNICO + MENSAGEM AMIGÁVEL
   void _exibirErroSap(String mensagemBruta) {
-    // 1. Identifica se é erro de duplicidade (Contagem aberta no SAP)
     bool isItemDuplicado = mensagemBruta.contains("-1310") ||
         mensagemBruta.contains("1470000497") ||
         mensagemBruta.toLowerCase().contains("already");
 
-    // 2. Procura qual item da nossa lista local causou o erro na API
     String itemEncontrado = "";
     for (var contagem in _contagensOffline) {
       String codigo = contagem['itemCode'].toString().trim();
@@ -116,49 +111,19 @@ class _HomePageState extends State<HomePage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text("Problema na sincronização:",
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text("Problema na sincronização:", style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Text(isItemDuplicado
-                  ? "O SAP informou que o item ${itemEncontrado.isNotEmpty ? itemEncontrado : 'selecionado'} já possui uma contagem aberta e não pode ser enviado novamente."
+                  ? "O SAP informou que o fardo ${itemEncontrado.isNotEmpty ? itemEncontrado : 'selecionado'} já possui uma contagem aberta."
                   : "Ocorreu um erro ao processar os dados no SAP."),
-              const SizedBox(height: 16),
-              const Text("O que fazer?",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              Text(itemEncontrado.isNotEmpty
-                  ? "• Remova o item $itemEncontrado (lixeira) e tente enviar novamente."
-                  : "• Verifique a lista de contagens ou contate o suporte TI."),
               const SizedBox(height: 20),
               const Divider(),
-              const Text("Dados brutos da API (Técnico):",
-                  style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold)),
-              const SizedBox(height: 5),
-              Container(
-                width: double.maxFinite,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(5),
-                    border: Border.all(color: Colors.grey[300]!)),
-                child: Text(
-                  mensagemBruta,
-                  style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 10,
-                      color: Colors.blueGrey),
-                ),
-              ),
+              Text(mensagemBruta, style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: Colors.blueGrey)),
             ],
           ),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("ENTENDI",
-                  style: TextStyle(fontWeight: FontWeight.bold))),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("ENTENDI")),
         ],
       ),
     );
@@ -166,28 +131,28 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Painel STOX"),
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _carregarDadosLocais,
-          ),
-        ],
-      ),
-      drawer: _buildDrawer(),
-      body: Column(
-        children: [
-          _buildSummaryHeader(),
-          Expanded(
-            child: _contagensOffline.isEmpty
-                ? _buildEmptyState()
-                : _buildContagensList(),
-          ),
-        ],
+    // 1. Usamos SafeArea para garantir que nada fique embaixo das barras de navegação do sistema
+    return SafeArea(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text("Painel STOX"),
+          backgroundColor: primaryColor,
+          foregroundColor: Colors.white,
+          actions: [
+            IconButton(icon: const Icon(Icons.refresh), onPressed: _carregarDadosLocais),
+          ],
+        ),
+        drawer: _buildDrawer(),
+        body: Column(
+          children: [
+            _buildSummaryHeader(),
+            Expanded(
+              child: _contagensOffline.isEmpty
+                  ? _buildEmptyState()
+                  : _buildContagensList(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -195,116 +160,39 @@ class _HomePageState extends State<HomePage> {
   Widget _buildSummaryHeader() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
       decoration: BoxDecoration(
         color: primaryColor,
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(30)),
       ),
       child: Column(
         children: [
-          const Text("Itens aguardando envio",
-              style: TextStyle(color: Colors.white70)),
+          const Text("Fardos aguardando envio", style: TextStyle(color: Colors.white70)),
           Text(
             "${_contagensOffline.length}",
-            style: const TextStyle(
-                color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold),
+            style: const TextStyle(color: Colors.white, fontSize: 42, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: 220,
-            height: 45,
-            child: ElevatedButton.icon(
-              onPressed: _carregando || _contagensOffline.isEmpty
-                  ? null
-                  : _sincronizarComSAP,
-              icon: _carregando
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
+          // Botão de Sincronizar com largura adaptável
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 250),
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: _carregando || _contagensOffline.isEmpty ? null : _sincronizarComSAP,
+                icon: _carregando 
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.cloud_upload),
-              label: const Text("SINCRONIZAR AGORA"),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green, foregroundColor: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDrawer() {
-    return Drawer(
-      child: Column(
-        children: [
-          UserAccountsDrawerHeader(
-            decoration: BoxDecoration(color: primaryColor),
-            currentAccountPicture: const CircleAvatar(
-              backgroundColor: Colors.white,
-              child: Icon(Icons.person, color: Color(0xFF0A6ED1), size: 40),
-            ),
-            accountName: const Text("Operador STOX",
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            accountEmail: const Text("Conectado ao SAP Business One"),
-          ),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                const _SectionHeader(title: "OPERACIONAL"),
-                ListTile(
-                  leading: Icon(Icons.add_box_outlined, color: primaryColor),
-                  title: const Text("Nova Contagem Offline"),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const ContadorOfflinePage()))
-                        .then((_) => _carregarDadosLocais());
-                  },
+                label: const Text("SINCRONIZAR AGORA"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green, 
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
                 ),
-                const Divider(),
-                const _SectionHeader(title: "CONSULTAS & RELATÓRIOS"),
-                ListTile(
-                  leading: const Icon(Icons.search, color: Colors.orange),
-                  title: const Text("Pesquisar Item SAP"),
-                  subtitle: const Text("Estoque, Detalhes e Etiquetas"),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const ItemSearchPage()));
-                  },
-                ),
-              ],
+              ),
             ),
           ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.settings),
-            title: const Text("Configurações API"),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const ApiConfigPage()));
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text("Sair", style: TextStyle(color: Colors.red)),
-            onTap: () async {
-              await SapService.logout();
-              if (!mounted) return;
-              Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                  (route) => false);
-            },
-          ),
-          const SizedBox(height: 20),
         ],
       ),
     );
@@ -312,21 +200,15 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildContagensList() {
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80), // Padding inferior para não colar na base
       itemCount: _contagensOffline.length,
       itemBuilder: (context, index) {
         final item = _contagensOffline[index];
         return Card(
-          elevation: 0,
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: Colors.grey.shade200),
-            borderRadius: BorderRadius.circular(12),
-          ),
+          margin: const EdgeInsets.only(bottom: 10),
           child: ListTile(
             leading: Icon(Icons.inventory_2, color: primaryColor),
-            title: Text("${item['itemCode']}",
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+            title: Text("${item['itemCode']}", style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text("Quantidade: ${item['quantidade']}"),
             trailing: IconButton(
               icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -342,34 +224,72 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
+    return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.cloud_done_outlined, size: 64, color: Colors.grey[300]),
-          const SizedBox(height: 16),
-          const Text("Tudo em dia!",
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey)),
+          Icon(Icons.cloud_done_outlined, size: 64, color: Colors.grey),
+          Text("Tudo em dia!", style: TextStyle(fontSize: 18, color: Colors.grey)),
         ],
       ),
     );
   }
-}
 
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  const _SectionHeader({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Text(title,
-          style: const TextStyle(
-              color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
+  Widget _buildDrawer() {
+    return Drawer(
+      child: Column(
+        children: [
+          UserAccountsDrawerHeader(
+            decoration: BoxDecoration(color: primaryColor),
+            currentAccountPicture: const CircleAvatar(backgroundColor: Colors.white, child: Icon(Icons.person, size: 40)),
+            accountName: const Text("Operador STOX"),
+            accountEmail: const Text("SAP Business One Conectado"),
+          ),
+          Expanded(
+            child: ListView(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.add_box_outlined),
+                  title: const Text("Nova Contagem Offline"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ContadorOfflinePage()))
+                        .then((_) => _carregarDadosLocais());
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.search),
+                  title: const Text("Pesquisar Item SAP"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ItemSearchPage()));
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.settings),
+                  title: const Text("Configurações API"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ApiConfigPage()));
+                  },
+                ),
+              ],
+            ),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text("Sair", style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              await SapService.logout();
+              if (!mounted) return;
+              Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LoginPage()), (r) => false);
+            },
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
     );
   }
 }

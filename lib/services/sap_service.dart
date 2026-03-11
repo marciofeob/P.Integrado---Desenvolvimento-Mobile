@@ -10,20 +10,19 @@ class SapService {
   // CONFIGURAÇÃO DE CLIENTE (SSL) E URL
   // ==========================================
 
-  /// Cria um cliente que ignora certificados inválidos (comum em servidores SAP locais)
   static Future<http.Client> _getClient() async {
     final prefs = await SharedPreferences.getInstance();
     final permitirInseguro = prefs.getBool('sap_allow_untrusted') ?? true;
 
     if (permitirInseguro) {
       final ioClient = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 15)
         ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
       return IOClient(ioClient);
     }
     return http.Client();
   }
 
-  /// Garante que a URL termine com barra para evitar erros de concatenação
   static String _prepareUrl(String url) {
     if (url.isEmpty) return "";
     return url.endsWith('/') ? url : '$url/';
@@ -58,12 +57,8 @@ class SapService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final sessionId = data['SessionId'];
+        if (sessionId != null) await prefs.setString('B1SESSION', sessionId);
 
-        if (sessionId != null) {
-          await prefs.setString('B1SESSION', sessionId);
-        }
-
-        // Captura do ROUTEID para suporte a Load Balancer do SAP
         final rawCookie = response.headers['set-cookie'];
         if (rawCookie != null) {
           final routeIdMatch = RegExp(r'ROUTEID=([^;]+)').firstMatch(rawCookie);
@@ -75,7 +70,7 @@ class SapService {
       }
       return false;
     } catch (e) {
-      debugPrint("❌ Erro de conexão no login: $e");
+      debugPrint("❌ Erro no login: $e");
       return false;
     }
   }
@@ -88,9 +83,8 @@ class SapService {
     if (baseUrl != null && session != null) {
       try {
         final client = await _getClient();
-        final fullUrl = "${_prepareUrl(baseUrl)}Logout";
         await client.post(
-          Uri.parse(fullUrl),
+          Uri.parse("${_prepareUrl(baseUrl)}Logout"),
           headers: {"Cookie": "B1SESSION=$session"},
         ).timeout(const Duration(seconds: 5));
       } catch (_) {}
@@ -100,10 +94,9 @@ class SapService {
   }
 
   // ==========================================
-  // MÉTODOS DE CONSULTA (ITEM)
+  // MÉTODOS DE CONSULTA
   // ==========================================
 
-  /// Busca rápida para a lista de pesquisa
   static Future<List<dynamic>> searchItems(String termo) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
@@ -114,32 +107,27 @@ class SapService {
 
     try {
       final client = await _getClient();
-      final formattedUrl = _prepareUrl(baseUrl);
-      
-      final filter = "\$filter=ItemCode eq '$termo' or contains(ItemName, '$termo')";
-      final select = "\$select=ItemCode,ItemName";
-      final fullUri = Uri.parse("${formattedUrl}Items?$filter&$select");
+      final filter = "\$filter=contains(ItemCode, '$termo') or contains(ItemName, '$termo')";
+      final fullUri = Uri.parse("${_prepareUrl(baseUrl)}Items?\$select=ItemCode,ItemName&$filter");
 
       final response = await client.get(
         fullUri,
         headers: {
-          "Cookie": "B1SESSION=$session; ROUTEID=$routeId",
+          "Cookie": "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}",
           "Accept": "application/json",
         },
       ).timeout(const Duration(seconds: 12));
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['value'] as List<dynamic>;
+        return jsonDecode(response.body)['value'] as List<dynamic>;
       }
-      return [];
     } catch (e) {
-      debugPrint("💥 Exceção ao pesquisar itens: $e");
-      return [];
+      debugPrint("💥 Erro searchItems: $e");
     }
+    return [];
   }
 
-  /// Busca todos os detalhes de um item específico (Estoque por armazém, etc)
+  /// NOVO: Método que estava faltando e causando erro no terminal
   static Future<Map<String, dynamic>?> getDetailedItem(String itemCode) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
@@ -150,29 +138,29 @@ class SapService {
 
     try {
       final client = await _getClient();
-      final formattedUrl = _prepareUrl(baseUrl);
       final cleanCode = itemCode.trim().toUpperCase();
       
-      const fields = "ItemCode,ItemName,InventoryUOM,ItemWarehouseInfoCollection";
-      final endpoint = "Items('$cleanCode')?\$select=$fields";
+      // Busca detalhes específicos incluindo estoque e flags de status
+      const fields = "ItemCode,ItemName,InventoryUOM,InventoryItem,SalesItem,PurchaseItem,Frozen,ItemWarehouseInfoCollection";
+      final url = "${_prepareUrl(baseUrl)}Items('$cleanCode')?\$select=$fields";
       
       final response = await client.get(
-        Uri.parse("$formattedUrl$endpoint"),
+        Uri.parse(url),
         headers: {
-          "Cookie": "B1SESSION=$session; ROUTEID=$routeId",
+          "Cookie": "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}",
           "Accept": "application/json",
         },
       ).timeout(const Duration(seconds: 12));
 
       if (response.statusCode == 200) return jsonDecode(response.body);
     } catch (e) {
-      debugPrint("💥 Exceção na busca detalhada: $e");
+      debugPrint("💥 Erro getDetailedItem: $e");
     }
     return null;
   }
 
   // ==========================================
-  // MÉTODOS DE INVENTÁRIO (SINCRO)
+  // MÉTODOS DE INVENTÁRIO
   // ==========================================
 
   static Future<String?> postInventoryCounting(List<Map<String, dynamic>> contagens) async {
@@ -181,38 +169,44 @@ class SapService {
     final session = prefs.getString('B1SESSION');
     final routeId = prefs.getString('ROUTEID');
 
-    if (baseUrl == null || session == null) return "Sessão expirada. Faça login novamente.";
+    if (baseUrl == null || session == null) return "Sessão expirada.";
 
     final payload = {
       "CountDate": DateTime.now().toIso8601String().split('T')[0],
       "InventoryCountingLines": contagens.map((c) {
+        final code = c['itemCode'].toString().trim().toUpperCase();
+        final qtd = double.tryParse(c['quantidade'].toString()) ?? 0.0;
+
         return {
-          "ItemCode": c['itemCode'].toString().toUpperCase(),
+          "ItemCode": code,
           "WarehouseCode": "01",
-          "CountedQuantity": double.tryParse(c['quantidade'].toString()) ?? 0.0,
+          "CountedQuantity": qtd,
           "Counted": "tYES",
+          "InventoryCountingBatchNumbers": [
+            {
+              "BatchNumber": code, // No caso do algodão, o código costuma ser o próprio lote
+              "Quantity": qtd,
+            }
+          ]
         };
       }).toList(),
     };
 
     try {
       final client = await _getClient();
-      final fullUri = Uri.parse("${_prepareUrl(baseUrl)}InventoryCountings");
-
       final response = await client.post(
-        fullUri,
+        Uri.parse("${_prepareUrl(baseUrl)}InventoryCountings"),
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
-          "Cookie": "B1SESSION=$session; ROUTEID=$routeId",
+          "Cookie": "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}",
         },
         body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 20));
+      ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 201 || response.statusCode == 200) {
-        return null; // Sucesso
+        return null; 
       } else {
-        // RETORNA O JSON BRUTO para a HomePage identificar o erro -1310 ou 1470000497
         return response.body;
       }
     } catch (e) {

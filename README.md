@@ -1,5 +1,3 @@
----
-
 #  STOX
 
 ### Plataforma Inteligente de Gestão de Inventário

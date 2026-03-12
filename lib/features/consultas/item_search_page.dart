@@ -6,7 +6,7 @@ import 'package:vibration/vibration.dart';
 import 'dart:async';
 
 import '../../services/sap_service.dart';
-import '../../services/ocr_service.dart'; // <-- IMPORTADO O SERVIÇO DE IA/OCR
+import '../../services/ocr_service.dart'; // Serviço de IA/OCR importado
 import 'etiqueta_page.dart';
 
 class ItemSearchPage extends StatefulWidget {
@@ -116,14 +116,15 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     }
   }
 
-  // --- NOVA FUNÇÃO: ESCANEAR TEXTO COM IA (OCR) ---
+  // --- FUNÇÃO: ESCANEAR TEXTO COM IA (OCR) ---
   Future<void> _escanearTextoIA() async {
     HapticFeedback.mediumImpact();
     
-    // Chama o serviço de OCR que criamos
+    // Chama o serviço de OCR
     final resultado = await OcrService.lerAnotacaoDaCamera();
     
-    if (resultado != null && resultado['itemCode']!.isNotEmpty) {
+    // Validação segura para evitar quebra caso 'itemCode' seja null
+    if (resultado != null && resultado['itemCode'] != null && resultado['itemCode']!.isNotEmpty) {
       setState(() {
         _searchController.text = resultado['itemCode']!;
       });
@@ -227,13 +228,16 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                             if (_scannerProcessando) return;
                             final barcodes = capture.barcodes;
                             if (barcodes.isNotEmpty) {
-                              _scannerProcessando = true;
                               final code = barcodes.first.rawValue ?? "";
+                              if (code.isEmpty) return;
+                              
+                              _scannerProcessando = true;
                               await _tocarFeedback('sounds/beep.mp3');
+                              
                               if (!mounted) return;
                               _searchController.text = code;
                               // ignore: use_build_context_synchronously
-                              Navigator.of(context).pop();
+                              Navigator.of(context).pop(); // Fecha o modal do scanner
                               _buscar();
                             }
                           },
@@ -336,7 +340,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                 hintText: "Código ou Nome",
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: Row(
-                  mainAxisSize: MainAxisSize.min, // Importante para ícones duplos
+                  mainAxisSize: MainAxisSize.min, // Garante que a Row não ocupe todo o TextField
                   children: [
                     // BOTÃO DA IA (OCR)
                     IconButton(
@@ -347,6 +351,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                     // BOTÃO DO SCANNER (BARCODE)
                     IconButton(
                       icon: Icon(Icons.qr_code_scanner_rounded, color: theme.primaryColor),
+                      tooltip: "Escanear código de barras",
                       onPressed: _abrirScanner,
                     ),
                   ],
@@ -370,8 +375,6 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       ),
     );
   }
-
-  // --- WIDGETS DE RESULTADOS (IDÊNTICOS AO SEU) ---
 
   Widget _buildSearchSuggestions() {
     return Expanded(

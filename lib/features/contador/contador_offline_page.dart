@@ -5,7 +5,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
 import 'package:stox/db/database_helper.dart';
 import 'package:stox/services/export_service.dart';
-import 'package:stox/services/ocr_service.dart'; // Importação do serviço de IA que criamos
+import 'package:stox/services/ocr_service.dart';
 
 class ContadorOfflinePage extends StatefulWidget {
   const ContadorOfflinePage({super.key});
@@ -76,7 +76,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     }
   }
 
-  // --- FUNÇÃO NOVA DA IA ---
+  // --- FUNÇÃO DA IA ---
   Future<void> _escanearComIA() async {
     HapticFeedback.lightImpact();
     FocusScope.of(context).unfocus();
@@ -98,7 +98,6 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       _mostrarMensagem('Leitura via IA concluída!', isSuccess: true);
       _focusNodeCodigo.nextFocus();
     } else {
-      // Caso o usuário cancele a câmera ou dê erro, não fazemos nada drástico
       HapticFeedback.selectionClick();
     }
   }
@@ -483,9 +482,8 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                 decoration: InputDecoration(
                   labelText: 'Código do Item',
                   prefixIcon: const Icon(Icons.inventory_2_outlined),
-                  // --- AQUI ESTÁ A MUDANÇA DOS ÍCONES ---
                   suffixIcon: Row(
-                    mainAxisSize: MainAxisSize.min, // Garante que a Row ocupe apenas o espaço necessário
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
                         tooltip: 'Ler com IA (Foto/Texto)',

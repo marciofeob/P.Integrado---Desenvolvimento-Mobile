@@ -1,24 +1,71 @@
 @startuml Casos
 title STOX - Diagrama de Casos de Uso
 
-actor Usuario
+actor "Operador" as Usuario
 actor "SAP Business One" as SAP
-actor "Motor de IA (YOLO)" as IA
+actor "Google ML Kit (OCR)" as IA
+actor "Impressora Térmica\n(Bluetooth ESC/POS)" as Printer
 
 rectangle Sistema {
 
-Usuario --> (Realizar Login)
+  Usuario --> (Realizar Login)
+  Usuario --> (Configurar API SAP)
+  Usuario --> (Realizar Contagem Offline)
+  Usuario --> (Sincronizar Inventário com SAP)
+  Usuario --> (Consultar Item SAP)
+  Usuario --> (Exportar Relatório CSV)
+  Usuario --> (Imprimir Etiqueta)
 
-Usuario --> (Realizar Contagem de Estoque)
+  (Realizar Contagem Offline) ..> (Ler Código via Scanner) : <<include>>
+  (Realizar Contagem Offline) ..> (Ler Código via OCR) : <<include>>
+  (Consultar Item SAP) ..> (Ler Código via Scanner) : <<include>>
+  (Consultar Item SAP) ..> (Ler Código via OCR) : <<include>>
 
-Usuario --> (Sincronizar Inventario com SAP)
-
-(Realizar Contagem de Estoque) --> (Processar Contagem com IA)
-
-(Processar Contagem com IA) --> IA
-
-(Sincronizar Inventario com SAP) --> SAP
+  (Ler Código via OCR) --> IA
+  (Sincronizar Inventário com SAP) --> SAP
+  (Consultar Item SAP) --> SAP
+  (Imprimir Etiqueta) --> Printer
 
 }
+
+@enduml
+
+
+@startuml Stories
+title STOX - Caso de Uso → User Stories → MVP
+
+rectangle "Caso de Uso" {
+  (Contagem de Estoque)
+}
+
+rectangle "User Stories - MVP (Implementadas)" {
+  (US01 - Login SAP)
+  (US02 - Configurar API)
+  (US03 - Escanear Código de Barras)
+  (US04 - Ler Item via OCR com IA)
+  (US05 - Confirmar e Salvar Contagem)
+  (US06 - Sincronizar com SAP)
+  (US07 - Consultar Item SAP)
+  (US08 - Exportar Relatório CSV)
+  (US09 - Imprimir Etiqueta Bluetooth)
+}
+
+rectangle "User Stories - Pós-MVP (Planejadas)" {
+  (US10 - Relatórios Avançados)
+  (US11 - Detectar Divergências)
+  (US12 - Dashboard Gerencial)
+  (US13 - Histórico por Período)
+  (US14 - Sugestão de Reposição)
+}
+
+(Contagem de Estoque) --> (US01 - Login SAP)
+(Contagem de Estoque) --> (US02 - Configurar API)
+(Contagem de Estoque) --> (US03 - Escanear Código de Barras)
+(Contagem de Estoque) --> (US04 - Ler Item via OCR com IA)
+(Contagem de Estoque) --> (US05 - Confirmar e Salvar Contagem)
+(Contagem de Estoque) --> (US06 - Sincronizar com SAP)
+(Contagem de Estoque) --> (US07 - Consultar Item SAP)
+(Contagem de Estoque) --> (US08 - Exportar Relatório CSV)
+(Contagem de Estoque) --> (US09 - Imprimir Etiqueta Bluetooth)
 
 @enduml

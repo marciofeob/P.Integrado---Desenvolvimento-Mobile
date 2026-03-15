@@ -1,33 +1,33 @@
 @startuml Estoque
 title STOX - Sistema de Contagem Inteligente de Estoque
 
-actor Usuario
+actor "Operador" as Usuario
 actor "SAP Business One" as SAP
-actor "Motor de IA (YOLO)" as IA
+actor "Google ML Kit (OCR)" as IA
+actor "Impressora Térmica\n(Bluetooth ESC/POS)" as Printer
 
 rectangle Sistema {
 
-Usuario --> (Realizar Login)
+  Usuario --> (Realizar Login)
+  Usuario --> (Configurar API SAP)
+  Usuario --> (Escanear Código de Barras)
+  Usuario --> (Ler Item via OCR)
+  Usuario --> (Registrar Contagem Offline)
+  Usuario --> (Sincronizar Inventário com SAP)
+  Usuario --> (Consultar Item SAP)
+  Usuario --> (Exportar Relatório CSV)
+  Usuario --> (Imprimir Etiqueta)
 
-Usuario --> (Sincronizar Produtos)
+  (Ler Item via OCR) ..> (Capturar Imagem) : <<include>>
+  (Ler Item via OCR) ..> (Recortar Imagem) : <<include>>
+  (Ler Item via OCR) --> IA
 
-Usuario --> (Escanear Codigo de Barras)
+  (Registrar Contagem Offline) ..> (Escanear Código de Barras) : <<extend>>
+  (Registrar Contagem Offline) ..> (Ler Item via OCR) : <<extend>>
 
-Usuario --> (Capturar Imagem)
-
-Usuario --> (Registrar Contagem)
-
-Usuario --> (Gerar Relatorio)
-
-(Capturar Imagem) --> (Processar Contagem com IA)
-
-(Processar Contagem com IA) --> IA
-
-(Sincronizar Produtos) --> SAP
-
-(Registrar Contagem) --> (Atualizar Estoque no SAP)
-
-(Atualizar Estoque no SAP) --> SAP
+  (Sincronizar Inventário com SAP) --> SAP
+  (Consultar Item SAP) --> SAP
+  (Imprimir Etiqueta) --> Printer
 
 }
 

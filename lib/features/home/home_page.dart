@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Import necessário
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 import '../../db/database_helper.dart';
 import '../../services/sap_service.dart';
@@ -20,7 +20,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _contagensOffline = [];
   bool _carregando = false;
-  String _nomeOperador = "Operador..."; // Variável de estado para o nome
+  String _nomeOperador = "Operador...";
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
@@ -35,12 +35,8 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  // Busca tanto as contagens quanto as infos do usuário
   Future<void> _carregarDadosIniciais() async {
-    await Future.wait([
-      _carregarDadosLocais(),
-      _carregarUsuario(),
-    ]);
+    await Future.wait([_carregarDadosLocais(), _carregarUsuario()]);
   }
 
   Future<void> _carregarUsuario() async {
@@ -59,7 +55,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _tocarFeedback(String assetPath, {bool isError = false}) async {
+  Future<void> _tocarFeedback(
+    String assetPath, {
+    bool isError = false,
+  }) async {
     try {
       if (await Vibration.hasVibrator()) {
         if (isError) {
@@ -78,20 +77,19 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _sincronizarComSAP() async {
     if (_contagensOffline.isEmpty) return;
-    
+
     HapticFeedback.lightImpact();
     setState(() => _carregando = true);
-    
+
     try {
-      final erro = await SapService.postInventoryCounting(_contagensOffline);
-      
+      final erro =
+          await SapService.postInventoryCounting(_contagensOffline);
+
       if (erro == null) {
         await _tocarFeedback('sounds/check.mp3');
-        
-        // Limpa os dados se a sincronização for 100% bem-sucedida
         await DatabaseHelper.instance.limparContagens();
         await _carregarDadosLocais();
-        
+
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -99,12 +97,17 @@ class _HomePageState extends State<HomePage> {
               children: [
                 Icon(Icons.check_circle_rounded, color: Colors.white),
                 SizedBox(width: 8),
-                Text('Sincronização concluída com sucesso!', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  'Sincronização concluída com sucesso!',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ],
             ),
             backgroundColor: Colors.green.shade700,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
           ),
         );
       } else {
@@ -121,12 +124,19 @@ class _HomePageState extends State<HomePage> {
             children: [
               const Icon(Icons.error_outline, color: Colors.white),
               const SizedBox(width: 8),
-              Expanded(child: Text('Erro: $e', style: const TextStyle(fontWeight: FontWeight.bold))),
+              Expanded(
+                child: Text(
+                  'Erro: $e',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
             ],
           ),
           backgroundColor: Colors.red.shade700,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
         ),
       );
     } finally {
@@ -135,8 +145,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _exibirErroSap(String mensagemBruta) {
-    bool isItemDuplicado =
-        mensagemBruta.contains("-1310") ||
+    bool isItemDuplicado = mensagemBruta.contains("-1310") ||
         mensagemBruta.contains("1470000497") ||
         mensagemBruta.toLowerCase().contains("already");
 
@@ -153,12 +162,18 @@ class _HomePageState extends State<HomePage> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
         title: Row(
           children: [
             Icon(
-              isItemDuplicado ? Icons.warning_amber_rounded : Icons.error_outline,
-              color: isItemDuplicado ? Colors.orange.shade700 : Colors.red.shade700,
+              isItemDuplicado
+                  ? Icons.warning_amber_rounded
+                  : Icons.error_outline,
+              color: isItemDuplicado
+                  ? Colors.orange.shade700
+                  : Colors.red.shade700,
               size: 28,
             ),
             const SizedBox(width: 10),
@@ -177,7 +192,10 @@ class _HomePageState extends State<HomePage> {
             children: [
               Text(
                 "Problema na sincronização:",
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey.shade800),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade800,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
@@ -191,7 +209,11 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(height: 8),
               Text(
                 "Log Técnico do SAP:",
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade600,
+                ),
               ),
               const SizedBox(height: 4),
               Container(
@@ -214,7 +236,8 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-        actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        actionsPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         actions: [
           ElevatedButton(
             onPressed: () {
@@ -222,11 +245,18 @@ class _HomePageState extends State<HomePage> {
               Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: isItemDuplicado ? Colors.orange.shade700 : Colors.red.shade700,
+              backgroundColor: isItemDuplicado
+                  ? Colors.orange.shade700
+                  : Colors.red.shade700,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: const Text("ENTENDI", style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text(
+              "ENTENDI",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -237,7 +267,10 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Painel STOX", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Painel STOX",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         elevation: 0,
         actions: [
           IconButton(
@@ -268,20 +301,22 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildSummaryHeader() {
     final theme = Theme.of(context);
-    
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
       decoration: BoxDecoration(
         color: theme.primaryColor,
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(32)),
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(32),
+        ),
         boxShadow: [
           BoxShadow(
-            // ignore: deprecated_member_use
-            color: theme.primaryColor.withOpacity(0.3), 
-            blurRadius: 12, 
-            offset: const Offset(0, 6)
-          )
+            // ✅ FIX: withOpacity(0.3) → withAlpha(77)  (0.3 * 255 ≈ 77)
+            color: theme.primaryColor.withAlpha(77),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
         ],
       ),
       child: Column(
@@ -289,7 +324,11 @@ class _HomePageState extends State<HomePage> {
         children: [
           const Text(
             "Itens aguardando envio",
-            style: TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -306,24 +345,33 @@ class _HomePageState extends State<HomePage> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton.icon(
-              onPressed: _carregando || _contagensOffline.isEmpty
-                  ? null
-                  : _sincronizarComSAP,
+              onPressed:
+                  _carregando || _contagensOffline.isEmpty
+                      ? null
+                      : _sincronizarComSAP,
               icon: _carregando
                   ? const SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.cloud_upload_rounded),
-              label: const Text("SINCRONIZAR AGORA", style: TextStyle(fontWeight: FontWeight.bold)),
+              label: const Text(
+                "SINCRONIZAR AGORA",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green.shade600,
                 foregroundColor: Colors.white,
                 disabledBackgroundColor: Colors.white24,
                 disabledForegroundColor: Colors.white70,
                 elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
             ),
           ),
@@ -338,6 +386,8 @@ class _HomePageState extends State<HomePage> {
       itemCount: _contagensOffline.length,
       itemBuilder: (context, index) {
         final item = _contagensOffline[index];
+        final deposito = item['warehouseCode'] ?? '01';
+
         return Card(
           elevation: 0,
           margin: const EdgeInsets.only(bottom: 12),
@@ -346,23 +396,40 @@ class _HomePageState extends State<HomePage> {
             side: BorderSide(color: Colors.grey.shade300),
           ),
           child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 6,
+            ),
             leading: CircleAvatar(
-              // ignore: deprecated_member_use
-              backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+              // ✅ FIX: withOpacity(0.1) → withAlpha(26)  (0.1 * 255 ≈ 26)
+              backgroundColor:
+                  Theme.of(context).primaryColor.withAlpha(26),
               radius: 22,
-              child: Icon(Icons.inventory_2_rounded, color: Theme.of(context).primaryColor, size: 22),
+              child: Icon(
+                Icons.inventory_2_rounded,
+                color: Theme.of(context).primaryColor,
+                size: 22,
+              ),
             ),
             title: Text(
               "${item['itemCode']}",
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
             ),
             subtitle: Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text("Quantidade lida: ${item['quantidade']}", style: TextStyle(color: Colors.grey.shade700)),
+              child: Text(
+                "Qtd: ${item['quantidade']}  •  Dep: $deposito",
+                style: TextStyle(color: Colors.grey.shade700),
+              ),
             ),
             trailing: IconButton(
-              icon: Icon(Icons.delete_outline_rounded, color: Colors.red.shade400),
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                color: Colors.red.shade400,
+              ),
               onPressed: () async {
                 HapticFeedback.vibrate();
                 await DatabaseHelper.instance.excluirContagem(item['id']);
@@ -386,12 +453,20 @@ class _HomePageState extends State<HomePage> {
               color: Colors.green.shade50,
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.cloud_done_rounded, size: 64, color: Colors.green.shade400),
+            child: Icon(
+              Icons.cloud_done_rounded,
+              size: 64,
+              color: Colors.green.shade400,
+            ),
           ),
           const SizedBox(height: 24),
           Text(
             "Tudo sincronizado!",
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey.shade800),
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade800,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -405,7 +480,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildDrawer() {
     final theme = Theme.of(context);
-    
+
     return Drawer(
       child: Column(
         children: [
@@ -413,9 +488,19 @@ class _HomePageState extends State<HomePage> {
             decoration: BoxDecoration(color: theme.primaryColor),
             currentAccountPicture: const CircleAvatar(
               backgroundColor: Colors.white,
-              child: Icon(Icons.person_rounded, size: 40, color: Colors.grey),
+              child: Icon(
+                Icons.person_rounded,
+                size: 40,
+                color: Colors.grey,
+              ),
             ),
-            accountName: Text(_nomeOperador, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), // <<< AQUI ESTÁ O NOME DINÂMICO
+            accountName: Text(
+              _nomeOperador,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
             accountEmail: const Row(
               children: [
                 Icon(Icons.check_circle, color: Colors.greenAccent, size: 14),
@@ -429,8 +514,14 @@ class _HomePageState extends State<HomePage> {
               padding: EdgeInsets.zero,
               children: [
                 ListTile(
-                  leading: Icon(Icons.add_box_rounded, color: theme.primaryColor),
-                  title: const Text("Nova Contagem Offline", style: TextStyle(fontWeight: FontWeight.w500)),
+                  leading: Icon(
+                    Icons.add_box_rounded,
+                    color: theme.primaryColor,
+                  ),
+                  title: const Text(
+                    "Nova Contagem Offline",
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
                   onTap: () {
                     HapticFeedback.selectionClick();
                     Navigator.pop(context);
@@ -443,14 +534,22 @@ class _HomePageState extends State<HomePage> {
                   },
                 ),
                 ListTile(
-                  leading: Icon(Icons.search_rounded, color: theme.primaryColor),
-                  title: const Text("Pesquisar Item SAP", style: TextStyle(fontWeight: FontWeight.w500)),
+                  leading: Icon(
+                    Icons.search_rounded,
+                    color: theme.primaryColor,
+                  ),
+                  title: const Text(
+                    "Pesquisar Item SAP",
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
                   onTap: () {
                     HapticFeedback.selectionClick();
                     Navigator.pop(context);
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const ItemSearchPage()),
+                      MaterialPageRoute(
+                        builder: (_) => const ItemSearchPage(),
+                      ),
                     );
                   },
                 ),
@@ -459,14 +558,25 @@ class _HomePageState extends State<HomePage> {
                   child: Divider(),
                 ),
                 ListTile(
-                  leading: Icon(Icons.settings_rounded, color: Colors.grey.shade600),
-                  title: Text("Configurações da API", style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)),
+                  leading: Icon(
+                    Icons.settings_rounded,
+                    color: Colors.grey.shade600,
+                  ),
+                  title: Text(
+                    "Configurações da API",
+                    style: TextStyle(
+                      color: Colors.grey.shade800,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   onTap: () {
                     HapticFeedback.selectionClick();
                     Navigator.pop(context);
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const ApiConfigPage()),
+                      MaterialPageRoute(
+                        builder: (_) => const ApiConfigPage(),
+                      ),
                     );
                   },
                 ),
@@ -476,7 +586,13 @@ class _HomePageState extends State<HomePage> {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.logout_rounded, color: Colors.red),
-            title: const Text("Sair da Conta", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            title: const Text(
+              "Sair da Conta",
+              style: TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             onTap: () async {
               HapticFeedback.heavyImpact();
               await SapService.logout();

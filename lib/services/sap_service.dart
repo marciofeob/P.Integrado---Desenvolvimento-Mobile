@@ -17,7 +17,8 @@ class SapService {
     if (permitirInseguro) {
       final ioClient = HttpClient()
         ..connectionTimeout = const Duration(seconds: 15)
-        ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+        ..badCertificateCallback =
+            (X509Certificate cert, String host, int port) => true;
       return IOClient(ioClient);
     }
     return http.Client();
@@ -32,28 +33,38 @@ class SapService {
   // MÉTODOS DE AUTENTICAÇÃO E USUÁRIO
   // ==========================================
 
-  static Future<bool> login({required String usuario, required String senha}) async {
+  static Future<bool> login({
+    required String usuario,
+    required String senha,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
     final company = prefs.getString('sap_company');
 
-    if (baseUrl == null || company == null || baseUrl.isEmpty || company.isEmpty) return false;
+    if (baseUrl == null ||
+        company == null ||
+        baseUrl.isEmpty ||
+        company.isEmpty) {
+      return false;
+    }
 
     http.Client? client;
     try {
       client = await _getClient();
       final fullUrl = "${_prepareUrl(baseUrl)}Login";
-      
-      final response = await client.post(
-        Uri.parse(fullUrl),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "CompanyDB": company,
-          "UserName": usuario,
-          "Password": senha,
-          "Language": 29
-        }),
-      ).timeout(const Duration(seconds: 15));
+
+      final response = await client
+          .post(
+            Uri.parse(fullUrl),
+            headers: {"Content-Type": "application/json"},
+            body: jsonEncode({
+              "CompanyDB": company,
+              "UserName": usuario,
+              "Password": senha,
+              "Language": 29,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -62,20 +73,17 @@ class SapService {
           await prefs.setString('B1SESSION', sessionId);
         }
 
-        // Extração segura dos cookies (B1SESSION e ROUTEID)
         final rawCookie = response.headers['set-cookie'];
         if (rawCookie != null) {
-          final routeIdMatch = RegExp(r'ROUTEID=([^;]+)').firstMatch(rawCookie);
+          final routeIdMatch =
+              RegExp(r'ROUTEID=([^;]+)').firstMatch(rawCookie);
           if (routeIdMatch != null) {
             await prefs.setString('ROUTEID', routeIdMatch.group(1)!);
           }
         }
 
-        // --- NOVO: BUSCA E SALVA O NOME DO OPERADOR ---
         final nomeOperador = await getNomeOperador(usuario);
-        // Se encontrar o nome usa ele, se não achar, usa o próprio código de usuário como fallback
         await prefs.setString('UserName', nomeOperador ?? usuario);
-        // ----------------------------------------------
 
         return true;
       }
@@ -84,7 +92,7 @@ class SapService {
       debugPrint("❌ Erro no login: $e");
       return false;
     } finally {
-      client?.close(); // Essencial para evitar vazamento de sockets em produção
+      client?.close();
     }
   }
 
@@ -101,17 +109,16 @@ class SapService {
       client = await _getClient();
       final cleanCode = userCode.trim().replaceAll("'", "''");
       final filter = "\$filter=UserCode eq '$cleanCode'";
-      final fullUri = Uri.parse("${_prepareUrl(baseUrl)}Users?\$select=UserName&$filter");
+      final fullUri = Uri.parse(
+        "${_prepareUrl(baseUrl)}Users?\$select=UserName&$filter",
+      );
 
-      final cookieHeader = "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}";
+      final cookieHeader =
+          "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}";
 
-      final response = await client.get(
-        fullUri,
-        headers: {
-          "Cookie": cookieHeader,
-          "Accept": "application/json",
-        },
-      ).timeout(const Duration(seconds: 15));
+      final response = await client
+          .get(fullUri, headers: {"Cookie": cookieHeader, "Accept": "application/json"})
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -137,20 +144,22 @@ class SapService {
       http.Client? client;
       try {
         client = await _getClient();
-        await client.post(
-          Uri.parse("${_prepareUrl(baseUrl)}Logout"),
-          headers: {"Cookie": "B1SESSION=$session"},
-        ).timeout(const Duration(seconds: 5));
+        await client
+            .post(
+              Uri.parse("${_prepareUrl(baseUrl)}Logout"),
+              headers: {"Cookie": "B1SESSION=$session"},
+            )
+            .timeout(const Duration(seconds: 5));
       } catch (e) {
         debugPrint("Aviso ao fazer logout no SAP: $e");
       } finally {
         client?.close();
       }
     }
-    
+
     await prefs.remove('B1SESSION');
     await prefs.remove('ROUTEID');
-    await prefs.remove('UserName'); // Remove o nome ao deslogar
+    await prefs.remove('UserName');
   }
 
   // ==========================================
@@ -168,24 +177,23 @@ class SapService {
     http.Client? client;
     try {
       client = await _getClient();
-      final termoLimpo = termo.replaceAll("'", "''"); // Previne quebra na query OData
-      final filter = "\$filter=contains(ItemCode, '$termoLimpo') or contains(ItemName, '$termoLimpo')";
-      final fullUri = Uri.parse("${_prepareUrl(baseUrl)}Items?\$select=ItemCode,ItemName&$filter");
+      final termoLimpo = termo.replaceAll("'", "''");
+      final filter =
+          "\$filter=contains(ItemCode, '$termoLimpo') or contains(ItemName, '$termoLimpo')";
+      final fullUri = Uri.parse(
+        "${_prepareUrl(baseUrl)}Items?\$select=ItemCode,ItemName&$filter",
+      );
 
-      final cookieHeader = "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}";
+      final cookieHeader =
+          "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}";
 
-      final response = await client.get(
-        fullUri,
-        headers: {
-          "Cookie": cookieHeader,
-          "Accept": "application/json",
-        },
-      ).timeout(const Duration(seconds: 15));
+      final response = await client
+          .get(fullUri, headers: {"Cookie": cookieHeader, "Accept": "application/json"})
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body)['value'] as List<dynamic>;
       } else if (response.statusCode == 401) {
-        // Sessão expirou
         await logout();
       }
     } catch (e) {
@@ -207,20 +215,23 @@ class SapService {
     http.Client? client;
     try {
       client = await _getClient();
-      final cleanCode = itemCode.trim().toUpperCase().replaceAll("'", "''");
-      
-      const fields = "ItemCode,ItemName,InventoryUOM,InventoryItem,SalesItem,PurchaseItem,Frozen,ItemWarehouseInfoCollection";
-      final url = "${_prepareUrl(baseUrl)}Items('$cleanCode')?\$select=$fields";
-      
-      final cookieHeader = "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}";
+      final cleanCode =
+          itemCode.trim().toUpperCase().replaceAll("'", "''");
 
-      final response = await client.get(
-        Uri.parse(url),
-        headers: {
-          "Cookie": cookieHeader,
-          "Accept": "application/json",
-        },
-      ).timeout(const Duration(seconds: 15));
+      const fields =
+          "ItemCode,ItemName,InventoryUOM,InventoryItem,SalesItem,PurchaseItem,Frozen,ItemWarehouseInfoCollection";
+      final url =
+          "${_prepareUrl(baseUrl)}Items('$cleanCode')?\$select=$fields";
+
+      final cookieHeader =
+          "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}";
+
+      final response = await client
+          .get(
+            Uri.parse(url),
+            headers: {"Cookie": cookieHeader, "Accept": "application/json"},
+          )
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -239,13 +250,17 @@ class SapService {
   // MÉTODOS DE INVENTÁRIO
   // ==========================================
 
-  static Future<String?> postInventoryCounting(List<Map<String, dynamic>> contagens) async {
+  static Future<String?> postInventoryCounting(
+    List<Map<String, dynamic>> contagens,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url');
     final session = prefs.getString('B1SESSION');
     final routeId = prefs.getString('ROUTEID');
 
-    if (baseUrl == null || session == null || baseUrl.isEmpty) return "Sessão expirada. Faça login novamente.";
+    if (baseUrl == null || session == null || baseUrl.isEmpty) {
+      return "Sessão expirada. Faça login novamente.";
+    }
 
     final payload = {
       "CountDate": DateTime.now().toIso8601String().split('T')[0],
@@ -253,17 +268,21 @@ class SapService {
         final code = c['itemCode'].toString().trim().toUpperCase();
         final qtd = double.tryParse(c['quantidade'].toString()) ?? 0.0;
 
+        // ✅ FIX: warehouseCode agora vem de cada contagem (salvo no SQLite)
+        // Fallback para '01' caso o campo não exista (compatibilidade com dados antigos)
+        final warehouse =
+            (c['warehouseCode']?.toString().trim().isNotEmpty == true)
+                ? c['warehouseCode'].toString().trim().toUpperCase()
+                : '01';
+
         return {
           "ItemCode": code,
-          "WarehouseCode": "01", // Depósito fixo conforme regra de negócio (ajustar se for dinâmico)
+          "WarehouseCode": warehouse,
           "CountedQuantity": qtd,
           "Counted": "tYES",
           "InventoryCountingBatchNumbers": [
-            {
-              "BatchNumber": code, // Código usado como Lote no cenário do Agrobusiness
-              "Quantity": qtd,
-            }
-          ]
+            {"BatchNumber": code, "Quantity": qtd},
+          ],
         };
       }).toList(),
     };
@@ -271,17 +290,20 @@ class SapService {
     http.Client? client;
     try {
       client = await _getClient();
-      final cookieHeader = "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}";
+      final cookieHeader =
+          "B1SESSION=$session${routeId != null ? '; ROUTEID=$routeId' : ''}";
 
-      final response = await client.post(
-        Uri.parse("${_prepareUrl(baseUrl)}InventoryCountings"),
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Cookie": cookieHeader,
-        },
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 30));
+      final response = await client
+          .post(
+            Uri.parse("${_prepareUrl(baseUrl)}InventoryCountings"),
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Cookie": cookieHeader,
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         return null; // Sucesso
@@ -289,14 +311,14 @@ class SapService {
         await logout();
         return "Sessão expirada. Faça login novamente no SAP.";
       } else {
-        // Tenta extrair a mensagem de erro da API do SAP
         try {
           final errorData = jsonDecode(response.body);
-          if (errorData['error'] != null && errorData['error']['message'] != null) {
+          if (errorData['error'] != null &&
+              errorData['error']['message'] != null) {
             return errorData['error']['message']['value'].toString();
           }
         } catch (_) {}
-        return response.body; // Retorna o body bruto se não conseguir fazer o parse
+        return response.body;
       }
     } catch (e) {
       return "Falha de comunicação: $e";

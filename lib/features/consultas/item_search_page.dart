@@ -6,7 +6,7 @@ import 'package:vibration/vibration.dart';
 import 'dart:async';
 
 import '../../services/sap_service.dart';
-import '../../services/ocr_service.dart'; // Serviço de IA/OCR importado
+import '../../services/ocr_service.dart';
 import 'etiqueta_page.dart';
 
 class ItemSearchPage extends StatefulWidget {
@@ -19,11 +19,11 @@ class ItemSearchPage extends StatefulWidget {
 class _ItemSearchPageState extends State<ItemSearchPage> {
   final _searchController = TextEditingController();
   final AudioPlayer _audioPlayer = AudioPlayer();
-  
+
   Timer? _debounceTimer;
   Map<String, dynamic>? _itemData;
   List<dynamic> _searchResults = [];
-  
+
   bool _loading = false;
   bool _scannerProcessando = false;
 
@@ -37,7 +37,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
 
   // --- MÉTODOS DE FEEDBACK E BUSCA ---
 
-  Future<void> _tocarFeedback(String assetPath, {bool isError = false}) async {
+  Future<void> _tocarFeedback(
+    String assetPath, {
+    bool isError = false,
+  }) async {
     try {
       if (await Vibration.hasVibrator()) {
         if (isError) {
@@ -62,7 +65,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     }
 
     if (!autoSearch) {
-      FocusScope.of(context).unfocus(); 
+      FocusScope.of(context).unfocus();
       HapticFeedback.lightImpact();
     }
 
@@ -83,7 +86,9 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
             _carregarDetalhes(results.first['ItemCode']);
           } else {
             _searchResults = results;
-            if (results.isNotEmpty && !autoSearch) HapticFeedback.selectionClick();
+            if (results.isNotEmpty && !autoSearch) {
+              HapticFeedback.selectionClick();
+            }
           }
         });
       }
@@ -116,19 +121,17 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     }
   }
 
-  // --- FUNÇÃO: ESCANEAR TEXTO COM IA (OCR) ---
   Future<void> _escanearTextoIA() async {
     HapticFeedback.mediumImpact();
-    
-    // Chama o serviço de OCR
+
     final resultado = await OcrService.lerAnotacaoDaCamera();
-    
-    // Validação segura para evitar quebra caso 'itemCode' seja null
-    if (resultado != null && resultado['itemCode'] != null && resultado['itemCode']!.isNotEmpty) {
+
+    if (resultado != null &&
+        resultado['itemCode'] != null &&
+        resultado['itemCode']!.isNotEmpty) {
       setState(() {
         _searchController.text = resultado['itemCode']!;
       });
-      // Toca um feedback de sucesso e inicia a busca
       await _tocarFeedback('sounds/beep.mp3');
       _buscar();
     }
@@ -144,12 +147,19 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
           children: [
             const Icon(Icons.error_outline, color: Colors.white),
             const SizedBox(width: 8),
-            Expanded(child: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold))),
+            Expanded(
+              child: Text(
+                msg,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
           ],
         ),
         backgroundColor: Colors.red.shade700,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
       ),
     );
   }
@@ -161,12 +171,19 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
           children: [
             const Icon(Icons.warning_amber_rounded, color: Colors.white),
             const SizedBox(width: 8),
-            Expanded(child: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold))),
+            Expanded(
+              child: Text(
+                msg,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
           ],
         ),
         backgroundColor: Colors.orange.shade700,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
       ),
     );
   }
@@ -182,7 +199,8 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => LayoutBuilder(builder: (context, constraints) {
+      builder: (context) =>
+          LayoutBuilder(builder: (context, constraints) {
         final scanWindow = Rect.fromCenter(
           center: Offset(constraints.maxWidth / 2, 200),
           width: 280,
@@ -193,18 +211,26 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
           height: MediaQuery.of(context).size.height * 0.85,
           decoration: const BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius:
+                BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
             child: Column(
               children: [
                 const SizedBox(height: 12),
                 Container(
-                  width: 48, height: 6, 
-                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+                  width: 48,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
                 AppBar(
-                  title: const Text('Escanear Código', style: TextStyle(fontWeight: FontWeight.bold)),
+                  title: const Text(
+                    'Escanear Código',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   centerTitle: true,
                   backgroundColor: Colors.transparent,
                   foregroundColor: Colors.black87,
@@ -212,9 +238,9 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                   automaticallyImplyLeading: false,
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.close_rounded), 
+                      icon: const Icon(Icons.close_rounded),
                       onPressed: () => Navigator.pop(context),
-                    )
+                    ),
                   ],
                 ),
                 Expanded(
@@ -228,33 +254,45 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                             if (_scannerProcessando) return;
                             final barcodes = capture.barcodes;
                             if (barcodes.isNotEmpty) {
-                              final code = barcodes.first.rawValue ?? "";
+                              final code =
+                                  barcodes.first.rawValue ?? "";
                               if (code.isEmpty) return;
-                              
+
                               _scannerProcessando = true;
                               await _tocarFeedback('sounds/beep.mp3');
-                              
+
                               if (!mounted) return;
                               _searchController.text = code;
                               // ignore: use_build_context_synchronously
-                              Navigator.of(context).pop(); // Fecha o modal do scanner
+                              Navigator.of(context).pop();
                               _buscar();
                             }
                           },
                         ),
                       ),
-                      // Overlay do Scanner (Visual)
+                      // ✅ FIX: withOpacity(0.7) → withAlpha(179)  (0.7 * 255 ≈ 179)
                       ColorFiltered(
-                        // ignore: deprecated_member_use
-                        colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.7), BlendMode.srcOut),
+                        colorFilter: ColorFilter.mode(
+                          Colors.black.withAlpha(179),
+                          BlendMode.srcOut,
+                        ),
                         child: Stack(
                           children: [
-                            Container(decoration: const BoxDecoration(color: Colors.black, backgroundBlendMode: BlendMode.dstOut)),
+                            Container(
+                              decoration: const BoxDecoration(
+                                color: Colors.black,
+                                backgroundBlendMode: BlendMode.dstOut,
+                              ),
+                            ),
                             Center(
                               child: Container(
                                 width: scanWindow.width,
                                 height: scanWindow.height,
-                                decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(16)),
+                                decoration: BoxDecoration(
+                                  color: Colors.red,
+                                  borderRadius:
+                                      BorderRadius.circular(16),
+                                ),
                               ),
                             ),
                           ],
@@ -265,7 +303,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                           width: scanWindow.width,
                           height: scanWindow.height,
                           decoration: BoxDecoration(
-                            border: Border.all(color: Theme.of(context).primaryColor, width: 3),
+                            border: Border.all(
+                              color: Theme.of(context).primaryColor,
+                              width: 3,
+                            ),
                             borderRadius: BorderRadius.circular(16),
                           ),
                         ),
@@ -275,8 +316,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                 ),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Text("Alinhe o código de barras dentro do quadro"),
-                )
+                  child: Text(
+                    "Alinhe o código de barras dentro do quadro",
+                  ),
+                ),
               ],
             ),
           ),
@@ -296,18 +339,30 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
           children: [
             _buildSearchBar(),
             if (_loading)
-              const Expanded(child: Center(child: CircularProgressIndicator())),
-            if (!_loading && _searchResults.isNotEmpty) _buildSearchSuggestions(),
+              const Expanded(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            if (!_loading && _searchResults.isNotEmpty)
+              _buildSearchSuggestions(),
             if (!_loading && _itemData != null) _buildResultList(),
-            if (!_loading && _itemData == null && _searchResults.isEmpty)
+            if (!_loading &&
+                _itemData == null &&
+                _searchResults.isEmpty)
               Expanded(
                 child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.search_rounded, size: 64, color: Colors.grey.shade300),
+                      Icon(
+                        Icons.search_rounded,
+                        size: 64,
+                        color: Colors.grey.shade300,
+                      ),
                       const SizedBox(height: 16),
-                      Text("Busque por código, nome ou use a IA.", style: TextStyle(color: Colors.grey.shade500)),
+                      Text(
+                        "Busque por código, nome ou use a IA.",
+                        style: TextStyle(color: Colors.grey.shade500),
+                      ),
                     ],
                   ),
                 ),
@@ -320,7 +375,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
 
   Widget _buildSearchBar() {
     final theme = Theme.of(context);
-    
+
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Row(
@@ -331,8 +386,11 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _buscar(),
               onChanged: (value) {
-                if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
-                _debounceTimer = Timer(const Duration(milliseconds: 600), () {
+                if (_debounceTimer?.isActive ?? false) {
+                  _debounceTimer!.cancel();
+                }
+                _debounceTimer =
+                    Timer(const Duration(milliseconds: 600), () {
                   if (value.trim().isNotEmpty) _buscar(autoSearch: true);
                 });
               },
@@ -340,17 +398,21 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                 hintText: "Código ou Nome",
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: Row(
-                  mainAxisSize: MainAxisSize.min, // Garante que a Row não ocupe todo o TextField
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    // BOTÃO DA IA (OCR)
                     IconButton(
-                      icon: const Icon(Icons.auto_awesome, color: Colors.blueAccent),
+                      icon: const Icon(
+                        Icons.auto_awesome,
+                        color: Colors.blueAccent,
+                      ),
                       tooltip: "Ler texto com IA",
                       onPressed: _escanearTextoIA,
                     ),
-                    // BOTÃO DO SCANNER (BARCODE)
                     IconButton(
-                      icon: Icon(Icons.qr_code_scanner_rounded, color: theme.primaryColor),
+                      icon: Icon(
+                        Icons.qr_code_scanner_rounded,
+                        color: theme.primaryColor,
+                      ),
                       tooltip: "Escanear código de barras",
                       onPressed: _abrirScanner,
                     ),
@@ -361,12 +423,15 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
           ),
           const SizedBox(width: 8),
           SizedBox(
-            height: 56, width: 56,
+            height: 56,
+            width: 56,
             child: ElevatedButton(
               onPressed: () => _buscar(),
               style: ElevatedButton.styleFrom(
                 padding: EdgeInsets.zero,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               child: const Icon(Icons.arrow_forward_rounded),
             ),
@@ -391,9 +456,15 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
               side: BorderSide(color: Colors.grey.shade300),
             ),
             child: ListTile(
-              title: Text(item['ItemName'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(
+                item['ItemName'] ?? '',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
               subtitle: Text(item['ItemCode'] ?? ''),
-              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+              trailing: const Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 16,
+              ),
               onTap: () => _carregarDetalhes(item['ItemCode']),
             ),
           );
@@ -412,7 +483,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
           _buildSectionTitle("Estoque por Depósito"),
           _buildWarehouseInfo(),
           _buildSectionTitle("Informações Adicionais"),
-          _buildDetailRow("Unidade de Medida", _itemData!['InventoryUOM'] ?? "UN"),
+          _buildDetailRow(
+            "Unidade de Medida",
+            _itemData!['InventoryUOM'] ?? "UN",
+          ),
           _buildDetailRow(
             "Item Bloqueado",
             _itemData!['Frozen'] == "tYES" ? "SIM" : "NÃO",
@@ -434,9 +508,19 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_itemData!['ItemCode'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+          Text(
+            _itemData!['ItemCode'] ?? '',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 8),
-          Text(_itemData!['ItemName'] ?? '', style: const TextStyle(color: Colors.white70)),
+          Text(
+            _itemData!['ItemName'] ?? '',
+            style: const TextStyle(color: Colors.white70),
+          ),
         ],
       ),
     );
@@ -459,43 +543,81 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   Widget _statusChip(String label, bool active) {
     return Chip(
       label: Text(label),
-      backgroundColor: active ? Colors.green.shade50 : Colors.grey.shade100,
-      avatar: Icon(active ? Icons.check_circle : Icons.cancel, size: 16, color: active ? Colors.green : Colors.grey),
+      backgroundColor: active
+          ? Colors.green.shade50
+          : Colors.grey.shade100,
+      avatar: Icon(
+        active ? Icons.check_circle : Icons.cancel,
+        size: 16,
+        color: active ? Colors.green : Colors.grey,
+      ),
     );
   }
 
   Widget _buildWarehouseInfo() {
-    final list = (_itemData!['ItemWarehouseInfoCollection'] as List? ?? []);
-    final warehouses = list.where((wh) => (wh['InStock'] ?? 0) > 0).toList();
+    final list =
+        (_itemData!['ItemWarehouseInfoCollection'] as List? ?? []);
+    final warehouses =
+        list.where((wh) => (wh['InStock'] ?? 0) > 0).toList();
 
-    if (warehouses.isEmpty) return const Text("Sem estoque disponível.");
+    if (warehouses.isEmpty) {
+      return const Text("Sem estoque disponível.");
+    }
 
     return Column(
-      children: warehouses.map((wh) => Card(
-        child: ListTile(
-          leading: const Icon(Icons.warehouse),
-          title: Text("Depósito ${wh['WarehouseCode']}"),
-          subtitle: Text("Disponível: ${wh['InStock']}"),
-          trailing: IconButton(
-            icon: const Icon(Icons.print),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EtiquetaPage(itemData: _itemData!, deposito: wh['WarehouseCode'].toString()))),
-          ),
-        ),
-      )).toList(),
+      children: warehouses
+          .map(
+            (wh) => Card(
+              child: ListTile(
+                leading: const Icon(Icons.warehouse),
+                title: Text("Depósito ${wh['WarehouseCode']}"),
+                subtitle: Text("Disponível: ${wh['InStock']}"),
+                trailing: IconButton(
+                  icon: const Icon(Icons.print),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EtiquetaPage(
+                        itemData: _itemData!,
+                        deposito: wh['WarehouseCode'].toString(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+          .toList(),
     );
   }
 
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 16,
+        ),
+      ),
     );
   }
 
-  Widget _buildDetailRow(String label, String value, {bool isAlert = false}) {
+  Widget _buildDetailRow(
+    String label,
+    String value, {
+    bool isAlert = false,
+  }) {
     return ListTile(
       title: Text(label),
-      trailing: Text(value, style: TextStyle(fontWeight: FontWeight.bold, color: isAlert ? Colors.red : Colors.black)),
+      trailing: Text(
+        value,
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: isAlert ? Colors.red : Colors.black,
+        ),
+      ),
     );
   }
 }

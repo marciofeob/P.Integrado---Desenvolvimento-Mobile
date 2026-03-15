@@ -5,34 +5,34 @@ rectangle "Caso de Uso" {
   (Contagem de Estoque)
 }
 
-rectangle "User Stories - MVP" {
-  (US01 Login)
-  (US02 Escanear Produto)
-  (US03 Capturar Imagem)
-  (US04 Confirmar Contagem)
-  (US05 Sincronizar SAP)
+rectangle "User Stories - MVP (Implementadas)" {
+  (US01 - Login SAP)
+  (US02 - Configurar API)
+  (US03 - Escanear Código de Barras)
+  (US04 - Ler Item via OCR com IA)
+  (US05 - Confirmar e Salvar Contagem)
+  (US06 - Sincronizar com SAP)
+  (US07 - Consultar Item SAP)
+  (US08 - Exportar Relatório CSV)
+  (US09 - Imprimir Etiqueta Bluetooth)
 }
 
-rectangle "User Stories - Pós-MVP" {
-  (US06 Relatorios)
-  (US07 Detectar Divergencias)
-  (US08 Dashboard)
-  (US09 Historico)
-  (US10 Sugestao de Reposicao)
+rectangle "User Stories - Pós-MVP (Planejadas)" {
+  (US10 - Relatórios Avançados)
+  (US11 - Detectar Divergências)
+  (US12 - Dashboard Gerencial)
+  (US13 - Histórico por Período)
+  (US14 - Sugestão de Reposição)
 }
 
-rectangle "MVP" {
-  (US01)
-  (US02)
-  (US03)
-  (US04)
-  (US05)
-}
-
-(Contagem de Estoque) --> (US01 Login)
-(Contagem de Estoque) --> (US02 Escanear Produto)
-(Contagem de Estoque) --> (US03 Capturar Imagem)
-(Contagem de Estoque) --> (US04 Confirmar Contagem)
-(Contagem de Estoque) --> (US05 Sincronizar SAP)
+(Contagem de Estoque) --> (US01 - Login SAP)
+(Contagem de Estoque) --> (US02 - Configurar API)
+(Contagem de Estoque) --> (US03 - Escanear Código de Barras)
+(Contagem de Estoque) --> (US04 - Ler Item via OCR com IA)
+(Contagem de Estoque) --> (US05 - Confirmar e Salvar Contagem)
+(Contagem de Estoque) --> (US06 - Sincronizar com SAP)
+(Contagem de Estoque) --> (US07 - Consultar Item SAP)
+(Contagem de Estoque) --> (US08 - Exportar Relatório CSV)
+(Contagem de Estoque) --> (US09 - Imprimir Etiqueta Bluetooth)
 
 @enduml

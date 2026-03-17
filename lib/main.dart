@@ -3,37 +3,42 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 
-import 'features/auth/login_page.dart';
-import 'core/themes/stox_theme.dart'; // <-- Caminho corrigido apontando para a pasta correta
+import 'app_stox.dart';
 
+/// Sobrescreve o cliente HTTP global para permitir SSL auto-assinado
+/// quando o usuário habilita a opção nas configurações.
 class SecureHttpOverrides extends HttpOverrides {
   static bool allowUntrusted = true;
 
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     return super.createHttpClient(context)
-      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+      ..badCertificateCallback =
+          (X509Certificate cert, String host, int port) {
         if (allowUntrusted) {
-          debugPrint('⚠️ AVISO: Certificado SSL ignorado para o host: $host (Configurado pelo usuário)');
-          return true; 
+          debugPrint(
+              '⚠️ AVISO: Certificado SSL ignorado para o host: $host '
+              '(Configurado pelo usuário)');
+          return true;
         }
-        return false; 
+        return false;
       };
   }
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  // Lê a preferência de SSL antes de qualquer requisição de rede
   final prefs = await SharedPreferences.getInstance();
-  SecureHttpOverrides.allowUntrusted = prefs.getBool('sap_allow_untrusted') ?? true;
-  
+  SecureHttpOverrides.allowUntrusted =
+      prefs.getBool('sap_allow_untrusted') ?? true;
   HttpOverrides.global = SecureHttpOverrides();
 
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]);
+  // Força orientação retrato
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
+  // Ajusta as cores da barra de status e navegação
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
@@ -42,18 +47,4 @@ void main() async {
   ));
 
   runApp(const StoxApp());
-}
-
-class StoxApp extends StatelessWidget {
-  const StoxApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'STOX - Inventário',
-      debugShowCheckedModeBanner: false,
-      theme: StoxTheme.lightTheme,
-      home: const LoginPage(),
-    );
-  }
 }

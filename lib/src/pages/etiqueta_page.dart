@@ -5,7 +5,9 @@ import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
-import 'label_config.dart';
+
+import '../models/label_config.dart';
+import '../widgets/widgets.dart';
 
 class EtiquetaPage extends StatefulWidget {
   final Map<String, dynamic> itemData;
@@ -26,7 +28,7 @@ class EtiquetaPage extends StatefulWidget {
 class _EtiquetaPageState extends State<EtiquetaPage>
     with SingleTickerProviderStateMixin {
   BlueThermalPrinter bluetooth = BlueThermalPrinter.instance;
-  List<BluetoothDevice> _devices       = [];
+  List<BluetoothDevice> _devices      = [];
   BluetoothDevice?      _selectedDevice;
   bool _isPrinting   = false;
   int  _printedCount = 0;
@@ -40,7 +42,8 @@ class _EtiquetaPageState extends State<EtiquetaPage>
   late TextEditingController _rodapeController;
   late TextEditingController _copiasController;
 
-  bool get _isLote => widget.itenslote != null && widget.itenslote!.isNotEmpty;
+  bool get _isLote =>
+      widget.itenslote != null && widget.itenslote!.isNotEmpty;
   List<Map<String, dynamic>> get _itensParaImprimir =>
       _isLote ? widget.itenslote! : [widget.itemData];
 
@@ -89,16 +92,17 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     }
   }
 
-  // ─── CONFIG ───────────────────────────────────────────────────────────────
+  // ─── CONFIG ──────────────────────────────────────────────────────────────
 
   Future<void> _carregarConfig() async {
     final config = await LabelConfig.carregar();
     if (!mounted) return;
     setState(() => _config = config);
-    _cab1Controller    = TextEditingController(text: config.cabecalhoLinha1);
-    _cab2Controller    = TextEditingController(text: config.cabecalhoLinha2);
-    _rodapeController  = TextEditingController(text: config.rodapeTexto);
-    _copiasController  = TextEditingController(text: config.copiasPorItem.toString());
+    _cab1Controller   = TextEditingController(text: config.cabecalhoLinha1);
+    _cab2Controller   = TextEditingController(text: config.cabecalhoLinha2);
+    _rodapeController = TextEditingController(text: config.rodapeTexto);
+    _copiasController =
+        TextEditingController(text: config.copiasPorItem.toString());
   }
 
   Future<void> _requestPermissions() async {
@@ -121,10 +125,9 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     }
   }
 
-  // ─── SALVAR CONFIG ────────────────────────────────────────────────────────
+  // ─── SALVAR CONFIG ───────────────────────────────────────────────────────
 
   Future<void> _salvarConfig() async {
-    HapticFeedback.lightImpact();
     FocusScope.of(context).unfocus();
     final novaConfig = _config.copyWith(
       cabecalhoLinha1: _cab1Controller.text.trim(),
@@ -136,28 +139,19 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     await _play('sounds/check.mp3');
     if (mounted) {
       setState(() => _config = novaConfig);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Row(children: [
-          Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-          SizedBox(width: 8),
-          Text('Configurações salvas!',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-        ]),
-        backgroundColor: Colors.green.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        duration: const Duration(seconds: 2),
-      ));
+      // ignore: use_build_context_synchronously
+      StoxSnackbar.sucesso(context, 'Configurações salvas!');
       _tabController.animateTo(0);
     }
   }
 
-  // ─── IMPRESSÃO ────────────────────────────────────────────────────────────
+  // ─── IMPRESSÃO ───────────────────────────────────────────────────────────
 
   Future<void> _imprimir() async {
     if (_selectedDevice == null) {
       await _play('sounds/error_beep.mp3', isError: true);
-      _mostrarSnackBar('Selecione uma impressora primeiro.', Colors.orange.shade700);
+      // ignore: use_build_context_synchronously
+      StoxSnackbar.aviso(context, 'Selecione uma impressora primeiro.');
       return;
     }
 
@@ -169,9 +163,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
 
     try {
       bool? isConnected = await bluetooth.isConnected;
-      if (!isConnected!) {
-        await bluetooth.connect(_selectedDevice!);
-      }
+      if (!isConnected!) await bluetooth.connect(_selectedDevice!);
 
       for (final item in _itensParaImprimir) {
         for (int copia = 0; copia < _config.copiasPorItem; copia++) {
@@ -186,17 +178,18 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       if (mounted) {
         await _play('sounds/check.mp3');
         final total = _itensParaImprimir.length * _config.copiasPorItem;
-        _mostrarSnackBar(
+        StoxSnackbar.sucesso(
+          context,
           _isLote
               ? '$total etiqueta${total != 1 ? 's' : ''} impressa${total != 1 ? 's' : ''} com sucesso!'
               : 'Impressão enviada com sucesso!',
-          Colors.green.shade700,
         );
       }
     } catch (e) {
       if (mounted) {
         await _play('sounds/fail.mp3', isFail: true);
-        _mostrarSnackBar('Erro de impressão: $e', Colors.red.shade700);
+        // ignore: use_build_context_synchronously
+      StoxSnackbar.erro(context, 'Erro de impressão: $e');
       }
     } finally {
       if (mounted) setState(() => _isPrinting = false);
@@ -210,63 +203,38 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     final unidade = item['InventoryUOM']?.toString() ?? '';
 
     bluetooth.printNewLine();
-
     if (_config.mostrarCabecalho && _config.cabecalhoLinha1.isNotEmpty) {
       bluetooth.printCustom(_config.cabecalhoLinha1, 2, 1);
     }
     if (_config.mostrarCabecalho && _config.cabecalhoLinha2.isNotEmpty) {
       bluetooth.printCustom(_config.cabecalhoLinha2, 1, 1);
     }
-
     bluetooth.printCustom('--------------------------------', 0, 1);
-
     if (_config.mostrarNomeItem && nome.isNotEmpty) {
       bluetooth.printCustom(nome, 1, 1);
     }
-
     bluetooth.printNewLine();
-
     if (_config.mostrarCodigoBarras) {
       bluetooth.printQRcode(codigo, 150, 150, 1);
     }
-
     if (_config.mostrarCodigoTexto) {
       bluetooth.printCustom(codigo, 1, 1);
     }
-
     bluetooth.printNewLine();
-
     final infoLinha = [
       if (_config.mostrarDeposito) 'DEP: $dep',
       if (_config.mostrarUnidade && unidade.isNotEmpty) 'UM: $unidade',
     ].join('  ');
-    if (infoLinha.isNotEmpty) {
-      bluetooth.printCustom(infoLinha, 0, 1);
-    }
-
+    if (infoLinha.isNotEmpty) bluetooth.printCustom(infoLinha, 0, 1);
     if (_config.mostrarRodape && _config.rodapeTexto.isNotEmpty) {
       bluetooth.printCustom(_config.rodapeTexto, 0, 1);
     }
-
     bluetooth.printNewLine();
     bluetooth.printNewLine();
-
-    if (_isLote) {
-      await Future.delayed(const Duration(milliseconds: 200));
-    }
+    if (_isLote) await Future.delayed(const Duration(milliseconds: 200));
   }
 
-  void _mostrarSnackBar(String msg, Color cor) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg,
-          style: const TextStyle(fontWeight: FontWeight.bold)),
-      backgroundColor: cor,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-    ));
-  }
-
-  // ─── BUILD ────────────────────────────────────────────────────────────────
+  // ─── BUILD ───────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -291,10 +259,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children: [
-              _buildPreviewTab(),
-              _buildConfigTab(),
-            ],
+            children: [_buildPreviewTab(), _buildConfigTab()],
           ),
         ),
         _buildPrintButton(),
@@ -302,7 +267,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     );
   }
 
-  // ─── SELETOR DE IMPRESSORA ────────────────────────────────────────────────
+  // ─── SELETOR DE IMPRESSORA ───────────────────────────────────────────────
 
   Widget _buildDeviceSelector() {
     return Container(
@@ -323,9 +288,9 @@ class _EtiquetaPageState extends State<EtiquetaPage>
               hint: const Text('Selecione a Impressora'),
               value: _selectedDevice,
               items: _devices
-                  .map((device) => DropdownMenuItem(
-                        value: device,
-                        child: Text(device.name ?? 'Dispositivo Desconhecido'),
+                  .map((d) => DropdownMenuItem(
+                        value: d,
+                        child: Text(d.name ?? 'Dispositivo Desconhecido'),
                       ))
                   .toList(),
               onChanged: (device) {
@@ -360,14 +325,10 @@ class _EtiquetaPageState extends State<EtiquetaPage>
 
   Widget _buildPreviewLote() {
     return Column(children: [
-      Container(
+      // Banner de resumo do lote
+      StoxCard(
         margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.blue.shade50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.blue.shade100),
-        ),
         child: Row(children: [
           Icon(Icons.info_outline_rounded,
               color: Colors.blue.shade700, size: 18),
@@ -406,12 +367,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
           separatorBuilder: (_, _) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final item = _itensParaImprimir[index];
-            return Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(color: Colors.grey.shade300),
-              ),
+            return StoxCard(
               child: ListTile(
                 leading: CircleAvatar(
                   backgroundColor:
@@ -459,24 +415,18 @@ class _EtiquetaPageState extends State<EtiquetaPage>
           ),
           if (_config.mostrarCabecalho) ...[
             const SizedBox(height: 8),
-            TextField(
+            StoxTextField(
               controller: _cab1Controller,
+              labelText: 'Linha 1 (ex: GRUPO JCN)',
+              prefixIcon: Icons.title_rounded,
               textCapitalization: TextCapitalization.characters,
-              onTap: () => HapticFeedback.selectionClick(),
-              decoration: const InputDecoration(
-                labelText: 'Linha 1 (ex: GRUPO JCN)',
-                prefixIcon: Icon(Icons.title_rounded),
-              ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            StoxTextField(
               controller: _cab2Controller,
+              labelText: 'Linha 2 (opcional)',
+              prefixIcon: Icons.subtitles_rounded,
               textCapitalization: TextCapitalization.words,
-              onTap: () => HapticFeedback.selectionClick(),
-              decoration: const InputDecoration(
-                labelText: 'Linha 2 (opcional)',
-                prefixIcon: Icon(Icons.subtitles_rounded),
-              ),
             ),
           ],
 
@@ -518,13 +468,10 @@ class _EtiquetaPageState extends State<EtiquetaPage>
           ),
           if (_config.mostrarRodape) ...[
             const SizedBox(height: 8),
-            TextField(
+            StoxTextField(
               controller: _rodapeController,
-              onTap: () => HapticFeedback.selectionClick(),
-              decoration: const InputDecoration(
-                labelText: 'Texto do rodapé (ex: VER. 1.0)',
-                prefixIcon: Icon(Icons.text_snippet_rounded),
-              ),
+              labelText: 'Texto do rodapé (ex: VER. 1.0)',
+              prefixIcon: Icons.text_snippet_rounded,
             ),
           ],
 
@@ -534,33 +481,22 @@ class _EtiquetaPageState extends State<EtiquetaPage>
           // ── Cópias ─────────────────────────────────────────────────────
           _sectionTitle('Cópias por Item'),
           const SizedBox(height: 8),
-          TextField(
+          StoxTextField(
             controller: _copiasController,
+            labelText: 'Quantidade de cópias',
+            prefixIcon: Icons.content_copy_rounded,
             keyboardType: TextInputType.number,
-            onTap: () => HapticFeedback.selectionClick(),
-            decoration: const InputDecoration(
-              labelText: 'Quantidade de cópias',
-              prefixIcon: Icon(Icons.content_copy_rounded),
-              helperText: 'Quantas etiquetas imprimir por item (1–99).',
-            ),
+            helperText: 'Quantas etiquetas imprimir por item (1–99).',
           ),
 
           const SizedBox(height: 32),
 
-          // ── Botão Salvar — visual diferenciado (outlined) ───────────────
-          OutlinedButton.icon(
+          // ── Salvar — outlined para diferenciar do botão imprimir ────────
+          StoxOutlinedButton(
+            label: 'SALVAR CONFIGURAÇÕES',
+            icon: Icons.save_rounded,
             onPressed: _salvarConfig,
-            icon: const Icon(Icons.save_rounded),
-            label: const Text('SALVAR CONFIGURAÇÕES',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 52),
-              side: BorderSide(
-                  color: Theme.of(context).primaryColor, width: 1.5),
-              foregroundColor: Theme.of(context).primaryColor,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
+            height: 52,
           ),
 
           const SizedBox(height: 20),
@@ -583,8 +519,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     );
   }
 
-  Widget _switchItem(
-      String label, bool value, ValueChanged<bool> onChanged) {
+  Widget _switchItem(String label, bool value, ValueChanged<bool> onChanged) {
     return SwitchListTile.adaptive(
       title: Text(label, style: const TextStyle(fontSize: 14)),
       value: value,
@@ -597,14 +532,13 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     );
   }
 
-  // ─── PREVIEW VISUAL ───────────────────────────────────────────────────────
+  // ─── PREVIEW VISUAL ──────────────────────────────────────────────────────
 
   Widget _buildVisualEtiqueta(Map<String, dynamic> item) {
     final codigo = item['ItemCode']?.toString() ?? '000';
     final nome   = item['ItemName']?.toString() ?? '';
     final dep    = item['_deposito']?.toString() ?? widget.deposito;
 
-    // Preview fixo proporcional — o tamanho real é gerenciado pela impressora
     const double previewWidth  = 260.0;
     const double previewHeight = 160.0;
 
@@ -616,7 +550,8 @@ class _EtiquetaPageState extends State<EtiquetaPage>
         color: Colors.white,
         border: Border.all(color: Colors.grey.shade300),
         boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 12, offset: Offset(0, 6))
+          BoxShadow(
+              color: Colors.black12, blurRadius: 12, offset: Offset(0, 6))
         ],
         borderRadius: BorderRadius.circular(10),
       ),
@@ -686,7 +621,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     );
   }
 
-  // ─── BOTÃO IMPRIMIR ───────────────────────────────────────────────────────
+  // ─── BOTÃO IMPRIMIR ──────────────────────────────────────────────────────
 
   Widget _buildPrintButton() {
     final total = _itensParaImprimir.length * _config.copiasPorItem;
@@ -699,28 +634,16 @@ class _EtiquetaPageState extends State<EtiquetaPage>
               color: Colors.black12, blurRadius: 10, offset: Offset(0, -2))
         ],
       ),
-      child: ElevatedButton.icon(
-        onPressed: _isPrinting ? null : _imprimir,
-        icon: _isPrinting
-            ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2.5))
-            : const Icon(Icons.print_rounded),
-        label: Text(
-          _isPrinting
-              ? 'Imprimindo $_printedCount de ${_itensParaImprimir.length}...'
-              : _isLote
-                  ? 'IMPRIMIR $total ETIQUETA${total != 1 ? 'S' : ''}'
-                  : 'IMPRIMIR ETIQUETA',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-        ),
-        style: ElevatedButton.styleFrom(
-          minimumSize: const Size(double.infinity, 54),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
+      child: StoxButton(
+        label: _isPrinting
+            ? 'Imprimindo $_printedCount de ${_itensParaImprimir.length}...'
+            : _isLote
+                ? 'IMPRIMIR $total ETIQUETA${total != 1 ? 'S' : ''}'
+                : 'IMPRIMIR ETIQUETA',
+        icon: _isPrinting ? null : Icons.print_rounded,
+        loading: _isPrinting,
+        onPressed: _imprimir,
+        height: 54,
       ),
     );
   }

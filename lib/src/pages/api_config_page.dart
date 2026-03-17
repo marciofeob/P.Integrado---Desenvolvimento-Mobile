@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
 
+import '../widgets/widgets.dart';
+
 class ApiConfigPage extends StatefulWidget {
   const ApiConfigPage({super.key});
 
@@ -39,8 +41,11 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
   Future<void> _play(String asset, {bool isError = false}) async {
     try {
       if (await Vibration.hasVibrator()) {
-        if (isError) { Vibration.vibrate(pattern: [0, 200, 100, 300]); }
-        else { Vibration.vibrate(duration: 120); }
+        if (isError) {
+          Vibration.vibrate(pattern: [0, 200, 100, 300]);
+        } else {
+          Vibration.vibrate(duration: 120);
+        }
       } else {
         isError ? HapticFeedback.vibrate() : HapticFeedback.heavyImpact();
       }
@@ -56,53 +61,35 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      _urlController.text      = prefs.getString('sap_url') ?? '';
-      _companyController.text  = prefs.getString('sap_company') ?? '';
+      _urlController.text      = prefs.getString('sap_url')             ?? '';
+      _companyController.text  = prefs.getString('sap_company')         ?? '';
       _depositoController.text = prefs.getString('sap_deposito_padrao') ?? '01';
-      _permitirSslInseguro     = prefs.getBool('sap_allow_untrusted') ?? true;
+      _permitirSslInseguro     = prefs.getBool('sap_allow_untrusted')   ?? true;
     });
   }
 
   Future<void> _saveConfig() async {
-    HapticFeedback.lightImpact();
     FocusScope.of(context).unfocus();
 
     final deposito = _depositoController.text.trim();
     if (deposito.isEmpty) {
       await _play('sounds/error_beep.mp3', isError: true);
-      _mostrarSnack('Informe o código do depósito padrão.',
-          Colors.orange.shade700);
+      // ignore: use_build_context_synchronously
+    StoxSnackbar.aviso(context, 'Informe o código do depósito padrão.');
       return;
     }
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('sap_url', _urlController.text.trim());
-    await prefs.setString('sap_company', _companyController.text.trim());
+    await prefs.setString('sap_url',            _urlController.text.trim());
+    await prefs.setString('sap_company',         _companyController.text.trim());
     await prefs.setString('sap_deposito_padrao', deposito.toUpperCase());
-    await prefs.setBool('sap_allow_untrusted', _permitirSslInseguro);
+    await prefs.setBool('sap_allow_untrusted',   _permitirSslInseguro);
 
     await _play('sounds/check.mp3');
     if (!mounted) return;
-    _mostrarSnack('Configurações salvas com sucesso!', Colors.green.shade700,
-        isSuccess: true);
+    // ignore: use_build_context_synchronously
+    StoxSnackbar.sucesso(context, 'Configurações salvas com sucesso!');
     Navigator.pop(context);
-  }
-
-  void _mostrarSnack(String msg, Color cor, {bool isSuccess = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(children: [
-          Icon(isSuccess ? Icons.check_circle : Icons.warning_amber_rounded,
-              color: Colors.white),
-          const SizedBox(width: 8),
-          Expanded(child: Text(msg,
-              style: const TextStyle(fontWeight: FontWeight.bold))),
-        ]),
-        backgroundColor: cor,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
   }
 
   // ─── BUILD ─────────────────────────────────────────────────────────────────
@@ -122,72 +109,60 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
               const Text('Conexão Service Layer',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               const SizedBox(height: 10),
-              Text('Ajuste os endereços para sincronização com o SAP Business One.',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+              Text(
+                'Ajuste os endereços para sincronização com o SAP Business One.',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+              ),
               const SizedBox(height: 30),
 
               // ── URL ──
-              TextField(
+              StoxTextField(
                 controller: _urlController,
+                labelText: 'Service Layer URL',
+                prefixIcon: Icons.link,
                 keyboardType: TextInputType.url,
                 textInputAction: TextInputAction.next,
-                onTap: () => HapticFeedback.selectionClick(),
-                decoration: const InputDecoration(
-                  labelText: 'Service Layer URL',
-                  hintText: 'https://servidor:50000/b1s/v1',
-                  prefixIcon: Icon(Icons.link),
-                ),
               ),
               const SizedBox(height: 20),
 
               // ── Company ──
-              TextField(
+              StoxTextField(
                 controller: _companyController,
+                labelText: 'CompanyDB',
+                prefixIcon: Icons.business,
                 textInputAction: TextInputAction.next,
-                onTap: () => HapticFeedback.selectionClick(),
-                decoration: const InputDecoration(
-                  labelText: 'CompanyDB',
-                  hintText: 'SBODemoBR',
-                  prefixIcon: Icon(Icons.business),
-                ),
               ),
               const SizedBox(height: 20),
 
               // ── Depósito ──
-              TextField(
+              StoxTextField(
                 controller: _depositoController,
+                labelText: 'Depósito Padrão',
+                prefixIcon: Icons.warehouse_rounded,
                 textInputAction: TextInputAction.done,
                 textCapitalization: TextCapitalization.characters,
-                onTap: () => HapticFeedback.selectionClick(),
                 onSubmitted: (_) => _saveConfig(),
-                decoration: const InputDecoration(
-                  labelText: 'Depósito Padrão',
-                  hintText: '01',
-                  prefixIcon: Icon(Icons.warehouse_rounded),
-                  helperText:
-                      'Código do depósito usado nas contagens de inventário.',
-                ),
+                helperText:
+                    'Código do depósito usado nas contagens de inventário.',
               ),
               const SizedBox(height: 25),
 
               // ── SSL ──
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
+              StoxCard(
                 child: SwitchListTile.adaptive(
                   title: const Text('Permitir SSL pré-assinado',
-                      style: TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
+                      style: TextStyle(
+                          fontWeight: FontWeight.w500, fontSize: 15)),
                   subtitle: Text(
-                    'Ative se o servidor SAP usar certificado auto-assinado (comum em dev/test).',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    'Ative se o servidor SAP usar certificado auto-assinado '
+                    '(comum em dev/test).',
+                    style:
+                        TextStyle(fontSize: 12, color: Colors.grey.shade600),
                   ),
                   value: _permitirSslInseguro,
                   // ignore: deprecated_member_use
                   activeColor: primaryColor,
-                  onChanged: (bool value) {
+                  onChanged: (value) {
                     HapticFeedback.selectionClick();
                     setState(() => _permitirSslInseguro = value);
                   },
@@ -196,10 +171,11 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
 
               const SizedBox(height: 40),
 
-              ElevatedButton.icon(
+              // ── Salvar ──
+              StoxButton(
+                label: 'SALVAR CONFIGURAÇÕES',
+                icon: Icons.save_rounded,
                 onPressed: _saveConfig,
-                icon: const Icon(Icons.save_rounded),
-                label: const Text('SALVAR CONFIGURAÇÕES'),
               ),
 
               const SizedBox(height: 20),

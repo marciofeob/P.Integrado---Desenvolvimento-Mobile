@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:barcode_widget/barcode_widget.dart';
@@ -72,7 +73,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     super.dispose();
   }
 
-  // ── Feedback ─────────────────────────────────────────────────────────────
+  // ── Feedback ──────────────────────────────────────────────────────────────
 
   Future<void> _play(String asset,
       {bool isError = false, bool isFail = false}) async {
@@ -93,7 +94,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       }
       await _audio.play(AssetSource(asset));
     } catch (e) {
-      debugPrint('EtiquetaPage._play: $e');
+      if (kDebugMode) debugPrint('EtiquetaPage._play: $e');
     }
   }
 
@@ -125,7 +126,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       final devices = await _bluetooth.getBondedDevices();
       if (mounted) setState(() => _devices = devices);
     } catch (e) {
-      debugPrint('EtiquetaPage._buscarDispositivosBluetooth: $e');
+      if (kDebugMode) debugPrint('EtiquetaPage._buscarDispositivosBluetooth: $e');
     }
   }
 
@@ -175,11 +176,10 @@ class _EtiquetaPageState extends State<EtiquetaPage>
 
       await _bluetooth.disconnect();
 
-      if (!mounted) return;
       await _play('sounds/check.mp3');
+      if (!mounted) return;
       final total = _itensParaImprimir.length * _config.copiasPorItem;
       StoxSnackbar.sucesso(
-        // ignore: use_build_context_synchronously
         context,
         _isLote
             ? '$total etiqueta${total != 1 ? 's' : ''} impressa${total != 1 ? 's' : ''} com sucesso!'
@@ -233,7 +233,6 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     _bluetooth.printNewLine();
     _bluetooth.printNewLine();
 
-    // Pequena pausa entre itens no lote para evitar buffer overflow
     if (_isLote) await Future.delayed(const Duration(milliseconds: 200));
   }
 
@@ -472,7 +471,6 @@ class _EtiquetaPageState extends State<EtiquetaPage>
           ),
           const SizedBox(height: 32),
 
-          // Outlined para diferenciar visualmente do botão Imprimir
           StoxOutlinedButton(
             label: 'SALVAR CONFIGURAÇÕES',
             icon: Icons.save_rounded,

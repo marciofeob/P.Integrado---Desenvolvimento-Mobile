@@ -18,7 +18,7 @@ class SapService {
   /// Cria um cliente HTTP respeitando a preferência de SSL do usuário.
   /// Sempre feche o cliente no bloco `finally` para evitar vazamento de sockets.
   static Future<http.Client> _getClient() async {
-    final prefs          = await SharedPreferences.getInstance();
+    final prefs            = await SharedPreferences.getInstance();
     final permitirInseguro = prefs.getBool('sap_allow_untrusted') ?? true;
 
     if (permitirInseguro) {
@@ -82,7 +82,7 @@ class SapService {
 
       return true;
     } catch (e) {
-      debugPrint('SapService.login: $e');
+      if (kDebugMode) debugPrint('SapService.login: $e');
       return false;
     } finally {
       client?.close();
@@ -115,7 +115,7 @@ class SapService {
         if (lista.isNotEmpty) return lista.first['UserName'] as String?;
       }
     } catch (e) {
-      debugPrint('SapService._buscarNomeOperador: $e');
+      if (kDebugMode) debugPrint('SapService._buscarNomeOperador: $e');
     } finally {
       client?.close();
     }
@@ -137,7 +137,7 @@ class SapService {
           headers: {'Cookie': 'B1SESSION=$session'},
         ).timeout(const Duration(seconds: 5));
       } catch (e) {
-        debugPrint('SapService.logout: $e');
+        if (kDebugMode) debugPrint('SapService.logout: $e');
       } finally {
         client?.close();
       }
@@ -184,7 +184,7 @@ class SapService {
       }
       if (response.statusCode == 401) await logout();
     } catch (e) {
-      debugPrint('SapService.searchItems: $e');
+      if (kDebugMode) debugPrint('SapService.searchItems: $e');
     } finally {
       client?.close();
     }
@@ -232,7 +232,7 @@ class SapService {
       }
       if (response.statusCode == 401) await logout();
     } catch (e) {
-      debugPrint('SapService.getDetailedItem: $e');
+      if (kDebugMode) debugPrint('SapService.getDetailedItem: $e');
     } finally {
       client?.close();
     }

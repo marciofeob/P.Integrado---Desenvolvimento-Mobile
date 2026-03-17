@@ -60,21 +60,21 @@ class ExportService {
       final linhas = <List<String>>[
         ['Código do Item', 'Depósito', 'Quantidade', 'Data e Hora', 'Status'],
         ...contagens.map((c) => [
-              c['itemCode']?.toString()              ?? '',
-              c['warehouseCode']?.toString()         ?? '01',
+              c['itemCode']?.toString()                        ?? '',
+              c['warehouseCode']?.toString()                   ?? '01',
               c['quantidade']?.toString().replaceAll('.', ',') ?? '0,0',
-              _formatarData(c['dataHora']?.toString() ?? ''),
-              _formatarStatus(c['syncStatus'] as int? ?? 0),
+              _formatarData(c['dataHora']?.toString()          ?? ''),
+              _formatarStatus(c['syncStatus'] as int?          ?? 0),
             ]),
       ];
 
       // BOM UTF-8 garante que o Excel reconheça acentos automaticamente
-      const bom    = '\uFEFF';
+      const bom      = '\uFEFF';
       final conteudo = bom + _toCsv(linhas);
 
-      final dir  = await getTemporaryDirectory();
+      final dir   = await getTemporaryDirectory();
       final agora = DateTime.now();
-      final tag  = '${agora.year}'
+      final tag   = '${agora.year}'
           '${agora.month.toString().padLeft(2, '0')}'
           '${agora.day.toString().padLeft(2, '0')}_'
           '${agora.hour.toString().padLeft(2, '0')}'
@@ -90,7 +90,7 @@ class ExportService {
         subject: 'Relatório STOX - $tag',
       );
     } catch (e) {
-      debugPrint('ExportService.exportarContagensParaCSV: $e');
+      if (kDebugMode) debugPrint('ExportService.exportarContagensParaCSV: $e');
       rethrow;
     }
   }

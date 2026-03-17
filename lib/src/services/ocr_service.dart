@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -34,11 +35,11 @@ class OcrService {
         aspectRatio: const CropAspectRatio(ratioX: 4, ratioY: 1),
         uiSettings: [
           AndroidUiSettings(
-            toolbarTitle:      'Recorte o texto',
-            toolbarColor:      Colors.black,
+            toolbarTitle:       'Recorte o texto',
+            toolbarColor:       Colors.black,
             toolbarWidgetColor: Colors.white,
-            initAspectRatio:   CropAspectRatioPreset.ratio16x9,
-            lockAspectRatio:   false,
+            initAspectRatio:    CropAspectRatioPreset.ratio16x9,
+            lockAspectRatio:    false,
             hideBottomControls: true,
           ),
           IOSUiSettings(title: 'Ajustar área'),
@@ -49,7 +50,7 @@ class OcrService {
       final resultado = await _reconhecerTexto(recorte.path);
       return _parsearTexto(resultado);
     } catch (e) {
-      debugPrint('OcrService.lerAnotacaoDaCamera: $e');
+      if (kDebugMode) debugPrint('OcrService.lerAnotacaoDaCamera: $e');
       return null;
     }
   }
@@ -61,7 +62,7 @@ class OcrService {
       if (imagem == null) return null;
       return await _reconhecerTexto(imagem.path);
     } catch (e) {
-      debugPrint('OcrService.extractText: $e');
+      if (kDebugMode) debugPrint('OcrService.extractText: $e');
       return null;
     }
   }
@@ -97,7 +98,7 @@ class OcrService {
     final ultimaParte = partes.last.replaceAll(',', '.');
     if (RegExp(r'^\d+(\.\d+)?$').hasMatch(ultimaParte)) {
       return {
-        'itemCode':  partes.sublist(0, partes.length - 1).join(' '),
+        'itemCode':   partes.sublist(0, partes.length - 1).join(' '),
         'quantidade': ultimaParte,
       };
     }

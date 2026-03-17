@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -29,6 +30,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   final _audio                = AudioPlayer();
 
   List<Map<String, dynamic>> _contagens    = [];
+  bool                       _iniciando    = true;
   bool                       _scannerAtivo = false;
   bool                       _modoSelecao  = false;
   final Set<int>             _selecionados = {};
@@ -50,7 +52,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     super.dispose();
   }
 
-  // ── Feedback ─────────────────────────────────────────────────────────────
+  // ── Feedback ──────────────────────────────────────────────────────────────
 
   Future<void> _play(String asset,
       {bool isError = false, bool isFail = false}) async {
@@ -71,7 +73,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       }
       await _audio.play(AssetSource(asset));
     } catch (e) {
-      debugPrint('ContadorOfflinePage._play: $e');
+      if (kDebugMode) debugPrint('ContadorOfflinePage._play: $e');
     }
   }
 
@@ -88,6 +90,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     if (!mounted) return;
     setState(() {
       _contagens = lista;
+      _iniciando = false;
       _selecionados.removeWhere((id) => !lista.any((c) => c['id'] == id));
     });
   }
@@ -371,7 +374,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => LayoutBuilder(
-        builder: (sheetCtx, constraints) {
+        builder: (_, constraints) {
           final scanWindow = Rect.fromCenter(
             center: Offset(constraints.maxWidth / 2, 200),
             width: 280,
@@ -432,7 +435,6 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                         },
                       ),
                     ),
-                    // Overlay de foco do scanner
                     ColorFiltered(
                       colorFilter: ColorFilter.mode(
                           Colors.black.withAlpha(179), BlendMode.srcOut),
@@ -669,7 +671,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                 // ignore: use_build_context_synchronously
                 Navigator.pop(dialogCtx);
                 await _carregarContagens();
-                // ignore: use_build_context_synchronously
+                if (!mounted) return;
                 StoxSnackbar.sucesso(context, 'Contagem atualizada!');
               },
               child: const Text('SALVAR'),
@@ -901,6 +903,17 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       );
 
   Widget _buildListaContagens() {
+    if (_iniciando) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 16),
+        child: Column(children: [
+          StoxSkeletonCard(),
+          StoxSkeletonCard(),
+          StoxSkeletonCard(),
+        ]),
+      );
+    }
+
     if (_contagens.isEmpty) {
       return StoxCard(
         padding: const EdgeInsets.all(32),
@@ -915,79 +928,83 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       );
     }
 
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: _contagens.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final item        = _contagens[index];
-        final syncStatus  = item['syncStatus'] ?? 0;
-        final deposito    = item['warehouseCode'] ?? '01';
-        final id          = item['id'] as int;
-        final selecionado = _selecionados.contains(id);
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: ListView.separated(
+        key: ValueKey(_contagens.length),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: _contagens.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final item        = _contagens[index];
+          final syncStatus  = item['syncStatus'] ?? 0;
+          final deposito    = item['warehouseCode'] ?? '01';
+          final id          = item['id'] as int;
+          final selecionado = _selecionados.contains(id);
 
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selecionado ? Colors.red.shade400 : Colors.grey.shade300,
-              width: selecionado ? 2 : 1,
-            ),
-            color: selecionado ? Colors.red.shade50 : Colors.white,
-          ),
-          child: ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            leading: _modoSelecao
-                ? Checkbox(
-                    value: selecionado,
-                    onChanged: (_) => _toggleSelecao(id),
-                    activeColor: Colors.red.shade600,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4)),
-                  )
-                : CircleAvatar(
-                    backgroundColor: syncStatus == 1
-                        ? Colors.green.shade50
-                        : Colors.orange.shade50,
-                    child: Icon(
-                      syncStatus == 1
-                          ? Icons.cloud_done_rounded
-                          : Icons.cloud_upload_rounded,
-                      color:
-                          syncStatus == 1 ? Colors.green : Colors.orange,
-                      size: 20,
-                    ),
-                  ),
-            title: Text(
-              item['itemCode'],
-              style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: selecionado ? Colors.red.shade700 : Colors.black87),
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'Qtd: ${item['quantidade']}  •  Dep: $deposito',
-                style: TextStyle(
-                    color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selecionado ? Colors.red.shade400 : Colors.grey.shade300,
+                width: selecionado ? 2 : 1,
               ),
+              color: selecionado ? Colors.red.shade50 : Colors.white,
             ),
-            trailing: _modoSelecao
-                ? null
-                : IconButton(
-                    icon: Icon(Icons.edit_rounded,
-                        color: Theme.of(context).primaryColor),
-                    onPressed: () => _abrirEdicao(item),
-                  ),
-            onTap:      _modoSelecao ? () => _toggleSelecao(id) : null,
-            onLongPress: _modoSelecao ? null : () => _entrarModoSelecao(id),
-          ),
-        );
-      },
+            child: ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              leading: _modoSelecao
+                  ? Checkbox(
+                      value: selecionado,
+                      onChanged: (_) => _toggleSelecao(id),
+                      activeColor: Colors.red.shade600,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4)),
+                    )
+                  : CircleAvatar(
+                      backgroundColor: syncStatus == 1
+                          ? Colors.green.shade50
+                          : Colors.orange.shade50,
+                      child: Icon(
+                        syncStatus == 1
+                            ? Icons.cloud_done_rounded
+                            : Icons.cloud_upload_rounded,
+                        color:
+                            syncStatus == 1 ? Colors.green : Colors.orange,
+                        size: 20,
+                      ),
+                    ),
+              title: Text(
+                item['itemCode'],
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: selecionado ? Colors.red.shade700 : Colors.black87),
+              ),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Qtd: ${item['quantidade']}  •  Dep: $deposito',
+                  style: TextStyle(
+                      color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                ),
+              ),
+              trailing: _modoSelecao
+                  ? null
+                  : IconButton(
+                      icon: Icon(Icons.edit_rounded,
+                          color: Theme.of(context).primaryColor),
+                      onPressed: () => _abrirEdicao(item),
+                    ),
+              onTap:      _modoSelecao ? () => _toggleSelecao(id) : null,
+              onLongPress: _modoSelecao ? null : () => _entrarModoSelecao(id),
+            ),
+          );
+        },
+      ),
     );
   }
 }

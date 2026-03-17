@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 
+import '../../app_stox.dart';
 import '../services/database_helper.dart';
 import '../services/sap_service.dart';
 import '../widgets/widgets.dart';
@@ -25,6 +27,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _contagens    = [];
+  bool                       _iniciando    = true;
   bool                       _carregando   = false;
   String                     _nomeOperador = 'Operador...';
   final _audio = AudioPlayer();
@@ -41,7 +44,7 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  // ── Feedback ─────────────────────────────────────────────────────────────
+  // ── Feedback ──────────────────────────────────────────────────────────────
 
   Future<void> _play(String asset,
       {bool isError = false, bool isFail = false}) async {
@@ -62,7 +65,7 @@ class _HomePageState extends State<HomePage> {
       }
       await _audio.play(AssetSource(asset));
     } catch (e) {
-      debugPrint('HomePage._play: $e');
+      if (kDebugMode) debugPrint('HomePage._play: $e');
     }
   }
 
@@ -81,7 +84,10 @@ class _HomePageState extends State<HomePage> {
   Future<void> _carregarContagens() async {
     final dados = await DatabaseHelper.instance.buscarContagens();
     if (!mounted) return;
-    setState(() => _contagens = dados);
+    setState(() {
+      _contagens = dados;
+      _iniciando = false;
+    });
   }
 
   // ── Sincronização ─────────────────────────────────────────────────────────
@@ -328,7 +334,7 @@ class _HomePageState extends State<HomePage> {
               onPressed: () {
                 Navigator.pop(context);
                 Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const ApiConfigPage()));
+                    StoxApp.transicaoPadrao(const ApiConfigPage()));
               },
             ),
           ElevatedButton(
@@ -338,7 +344,7 @@ class _HomePageState extends State<HomePage> {
               if (erro.titulo.contains('expirada')) {
                 Navigator.pushAndRemoveUntil(
                   context,
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                  StoxApp.transicaoPadrao(const LoginPage()),
                   (r) => false,
                 );
               }
@@ -383,16 +389,27 @@ class _HomePageState extends State<HomePage> {
       drawer: _buildDrawer(),
       body: SafeArea(
         child: Column(children: [
+          // ── Linear loading durante sincronização ──
+          if (_carregando) const StoxLinearLoading(),
+
           StoxSummaryCard(
-            totalItens:   _contagens.length,
-            carregando:   _carregando,
+            totalItens:    _contagens.length,
+            carregando:    _carregando,
             onSincronizar: _sincronizarComSAP,
           ),
-          Expanded(
-            child: _contagens.isEmpty
-                ? _buildEmptyState()
-                : _buildListaContagens(),
-          ),
+
+          // ── Skeleton no primeiro carregamento ──
+          if (_iniciando)
+            const StoxSkeletonList(quantidade: 5)
+          else if (_contagens.isEmpty)
+            Expanded(child: _buildEmptyState())
+          else
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: _buildListaContagens(),
+              ),
+            ),
         ]),
       ),
     );
@@ -401,6 +418,7 @@ class _HomePageState extends State<HomePage> {
   // ── Subwidgets do Build ───────────────────────────────────────────────────
 
   Widget _buildListaContagens() => ListView.builder(
+        key: ValueKey(_contagens.length),
         padding: const EdgeInsets.fromLTRB(16, 24, 16, 80),
         itemCount: _contagens.length,
         itemBuilder: (context, index) {
@@ -498,8 +516,7 @@ class _HomePageState extends State<HomePage> {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const ContadorOfflinePage()),
+                    StoxApp.transicaoPadrao(const ContadorOfflinePage()),
                   ).then((_) => _carregarContagens());
                 },
               ),
@@ -512,7 +529,7 @@ class _HomePageState extends State<HomePage> {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const ItemSearchPage()),
+                    StoxApp.transicaoPadrao(const ItemSearchPage()),
                   );
                 },
               ),
@@ -532,7 +549,7 @@ class _HomePageState extends State<HomePage> {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const ApiConfigPage()),
+                    StoxApp.transicaoPadrao(const ApiConfigPage()),
                   );
                 },
               ),
@@ -550,7 +567,7 @@ class _HomePageState extends State<HomePage> {
             if (!mounted) return;
             Navigator.pushAndRemoveUntil(
               context,
-              MaterialPageRoute(builder: (_) => const LoginPage()),
+              StoxApp.transicaoPadrao(const LoginPage()),
               (r) => false,
             );
           },

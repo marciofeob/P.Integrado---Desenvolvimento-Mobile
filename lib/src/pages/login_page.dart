@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../app_stox.dart';
 import '../services/sap_service.dart';
 import '../widgets/widgets.dart';
 import 'api_config_page.dart';
@@ -78,7 +79,7 @@ class _LoginPageState extends State<LoginPage> {
       HapticFeedback.heavyImpact();
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const HomePage()),
+        StoxApp.transicaoPadrao(const HomePage()),
       );
     } catch (e) {
       if (!mounted) return;
@@ -110,7 +111,8 @@ class _LoginPageState extends State<LoginPage> {
                     const SizedBox(height: 24),
                     const Text(
                       'Contagem de Estoque',
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          fontSize: 22, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -120,42 +122,41 @@ class _LoginPageState extends State<LoginPage> {
                     const SizedBox(height: 40),
 
                     StoxTextField(
-                      controller: _usuarioController,
-                      labelText: 'Usuário',
-                      prefixIcon: Icons.person_outline,
+                      controller:      _usuarioController,
+                      labelText:       'Usuário',
+                      prefixIcon:      Icons.person_outline,
                       textInputAction: TextInputAction.next,
                     ),
                     const SizedBox(height: 20),
 
                     StoxPasswordField(
-                      controller: _senhaController,
+                      controller:      _senhaController,
                       textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _login(),
+                      onSubmitted:     (_) => _login(),
                     ),
 
                     Align(
                       alignment: Alignment.centerRight,
                       child: StoxTextButton(
-                        label: 'Limpar',
+                        label:     'Limpar',
                         onPressed: _limparCampos,
                       ),
                     ),
                     const SizedBox(height: 20),
 
                     StoxButton(
-                      label: 'ENTRAR E SINCRONIZAR',
-                      loading: _carregando,
+                      label:     'ENTRAR E SINCRONIZAR',
+                      loading:   _carregando,
                       onPressed: _login,
                     ),
                     const SizedBox(height: 16),
 
                     StoxOutlinedButton(
                       label: 'MODO CONTADOR OFFLINE',
-                      icon: Icons.qr_code_scanner,
+                      icon:  Icons.qr_code_scanner,
                       onPressed: () => Navigator.push(
                         context,
-                        MaterialPageRoute(
-                            builder: (_) => const ContadorOfflinePage()),
+                        StoxApp.transicaoPadrao(const ContadorOfflinePage()),
                       ),
                     ),
 
@@ -163,11 +164,10 @@ class _LoginPageState extends State<LoginPage> {
 
                     StoxTextButton(
                       label: 'Configurações da API',
-                      icon: Icons.settings,
+                      icon:  Icons.settings,
                       onPressed: () => Navigator.push(
                         context,
-                        MaterialPageRoute(
-                            builder: (_) => const ApiConfigPage()),
+                        StoxApp.transicaoPadrao(const ApiConfigPage()),
                       ),
                     ),
                     const SizedBox(height: 20),

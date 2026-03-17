@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,7 +41,7 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
     super.dispose();
   }
 
-  // ── Feedback ─────────────────────────────────────────────────────────────
+  // ── Feedback ──────────────────────────────────────────────────────────────
 
   Future<void> _play(String asset, {bool isError = false}) async {
     try {
@@ -54,7 +55,7 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
       }
       await _audio.play(AssetSource(asset));
     } catch (e) {
-      debugPrint('ApiConfigPage._play: $e');
+      if (kDebugMode) debugPrint('ApiConfigPage._play: $e');
     }
   }
 
@@ -84,9 +85,9 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('sap_url',             _urlController.text.trim());
-    await prefs.setString('sap_company',          _companyController.text.trim());
-    await prefs.setString('sap_deposito_padrao',  deposito.toUpperCase());
-    await prefs.setBool('sap_allow_untrusted',    _permitirSslInseguro);
+    await prefs.setString('sap_company',         _companyController.text.trim());
+    await prefs.setString('sap_deposito_padrao', deposito.toUpperCase());
+    await prefs.setBool('sap_allow_untrusted',   _permitirSslInseguro);
 
     await _play('sounds/check.mp3');
     if (!mounted) return;
@@ -120,29 +121,29 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
               const SizedBox(height: 30),
 
               StoxTextField(
-                controller: _urlController,
-                labelText: 'Service Layer URL',
-                prefixIcon: Icons.link,
-                keyboardType: TextInputType.url,
+                controller:      _urlController,
+                labelText:       'Service Layer URL',
+                prefixIcon:      Icons.link,
+                keyboardType:    TextInputType.url,
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 20),
 
               StoxTextField(
-                controller: _companyController,
-                labelText: 'CompanyDB',
-                prefixIcon: Icons.business,
+                controller:      _companyController,
+                labelText:       'CompanyDB',
+                prefixIcon:      Icons.business,
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 20),
 
               StoxTextField(
-                controller: _depositoController,
-                labelText: 'Depósito Padrão',
-                prefixIcon: Icons.warehouse_rounded,
-                textInputAction: TextInputAction.done,
+                controller:         _depositoController,
+                labelText:          'Depósito Padrão',
+                prefixIcon:         Icons.warehouse_rounded,
+                textInputAction:    TextInputAction.done,
                 textCapitalization: TextCapitalization.characters,
-                onSubmitted: (_) => _salvarConfig(),
+                onSubmitted:        (_) => _salvarConfig(),
                 helperText: 'Código do depósito usado nas contagens de inventário.',
               ),
               const SizedBox(height: 25),
@@ -151,12 +152,14 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
                 child: SwitchListTile.adaptive(
                   title: const Text(
                     'Permitir SSL pré-assinado',
-                    style: TextStyle(fontWeight: FontWeight.w500, fontSize: 15),
+                    style: TextStyle(
+                        fontWeight: FontWeight.w500, fontSize: 15),
                   ),
                   subtitle: Text(
                     'Ative se o servidor SAP usar certificado auto-assinado '
                     '(comum em ambientes de desenvolvimento e teste).',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey.shade600),
                   ),
                   value: _permitirSslInseguro,
                   // ignore: deprecated_member_use
@@ -171,8 +174,8 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
               const SizedBox(height: 40),
 
               StoxButton(
-                label: 'SALVAR CONFIGURAÇÕES',
-                icon: Icons.save_rounded,
+                label:     'SALVAR CONFIGURAÇÕES',
+                icon:      Icons.save_rounded,
                 onPressed: _salvarConfig,
               ),
 

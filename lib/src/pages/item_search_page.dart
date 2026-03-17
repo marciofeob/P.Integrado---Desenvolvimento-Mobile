@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
 
+import '../../app_stox.dart';
 import '../services/sap_service.dart';
 import '../services/ocr_service.dart';
 import '../widgets/widgets.dart';
@@ -56,13 +58,11 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     final itens = _carrinho.values.toList();
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => EtiquetaPage(
-          itemData:  itens.first,
-          deposito:  itens.first['_deposito']?.toString() ?? '01',
-          itenslote: itens,
-        ),
-      ),
+      StoxApp.transicaoPadrao(EtiquetaPage(
+        itemData:  itens.first,
+        deposito:  itens.first['_deposito']?.toString() ?? '01',
+        itenslote: itens,
+      )),
     );
   }
 
@@ -85,7 +85,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     );
   }
 
-  // ── Feedback ─────────────────────────────────────────────────────────────
+  // ── Feedback ──────────────────────────────────────────────────────────────
 
   Future<void> _play(String asset,
       {bool isError = false, bool isFail = false}) async {
@@ -106,7 +106,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       }
       await _audio.play(AssetSource(asset));
     } catch (e) {
-      debugPrint('ItemSearchPage._play: $e');
+      if (kDebugMode) debugPrint('ItemSearchPage._play: $e');
     }
   }
 
@@ -127,8 +127,8 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     if (!sessaoAtiva) {
       if (!autoSearch && mounted) {
         await _play('sounds/error_beep.mp3', isError: true);
+        if (!mounted) return;
         StoxSnackbar.erro(
-            // ignore: use_build_context_synchronously
             context, 'Sessão SAP não encontrada. Faça login antes de pesquisar.');
       }
       return;
@@ -214,7 +214,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => LayoutBuilder(
-        builder: (sheetCtx, constraints) {
+        builder: (_, constraints) {
           final scanWindow = Rect.fromCenter(
             center: Offset(constraints.maxWidth / 2, 200),
             width: 280,
@@ -341,6 +341,9 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       ),
       body: SafeArea(
         child: Column(children: [
+          // ── Linear loading durante busca ──
+          if (_carregando) const StoxLinearLoading(),
+
           StoxSearchBar(
             controller: _searchController,
             onSearch:   _buscar,
@@ -353,8 +356,6 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
               });
             },
           ),
-          if (_carregando)
-            const Expanded(child: Center(child: CircularProgressIndicator())),
           if (!_carregando && _resultados.isNotEmpty)
             _buildSugestoesBusca(),
           if (!_carregando && _itemData != null)
@@ -604,12 +605,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                     HapticFeedback.lightImpact();
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => EtiquetaPage(
-                          itemData: _itemData!,
-                          deposito: wh['WarehouseCode'].toString(),
-                        ),
-                      ),
+                      StoxApp.transicaoPadrao(EtiquetaPage(
+                        itemData: _itemData!,
+                        deposito: wh['WarehouseCode'].toString(),
+                      )),
                     );
                   },
                 ),
@@ -665,8 +664,6 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
 // ── Sheet do carrinho de impressão ───────────────────────────────────────────
 
 /// Bottom sheet com estado próprio para gerenciar a fila de impressão.
-/// Mantém cópia local das chaves para atualizar a lista imediatamente
-/// ao excluir sem depender do setState do pai.
 class _CarrinhoSheet extends StatefulWidget {
   final Map<String, Map<String, dynamic>> carrinho;
   final Color        primaryColor;
@@ -739,18 +736,18 @@ class _CarrinhoSheetState extends State<_CarrinhoSheet> {
               TextButton.icon(
                 onPressed: () => showDialog(
                   context: context,
-                  builder: (_) => AlertDialog(
+                  builder: (dialogCtx) => AlertDialog(
                     title: const Text('Limpar fila'),
                     content:
                         const Text('Remover todos os itens da fila de impressão?'),
                     actions: [
                       StoxTextButton(
                         label:     'CANCELAR',
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: () => Navigator.pop(dialogCtx),
                       ),
                       ElevatedButton(
                         onPressed: () {
-                          Navigator.pop(context);
+                          Navigator.pop(dialogCtx);
                           _limpar();
                         },
                         style: ElevatedButton.styleFrom(

@@ -1,10 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:vibration/vibration.dart';
 
+import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
 
 /// Tela de configuração da conexão com o SAP Business One Service Layer.
@@ -22,7 +20,6 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
   final _urlController      = TextEditingController();
   final _companyController  = TextEditingController();
   final _depositoController = TextEditingController();
-  final _audio              = AudioPlayer();
 
   bool _permitirSslInseguro = true;
 
@@ -37,26 +34,7 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
     _urlController.dispose();
     _companyController.dispose();
     _depositoController.dispose();
-    _audio.dispose();
     super.dispose();
-  }
-
-  // ── Feedback ──────────────────────────────────────────────────────────────
-
-  Future<void> _play(String asset, {bool isError = false}) async {
-    try {
-      final temVibrador = await Vibration.hasVibrator();
-      if (temVibrador) {
-        isError
-            ? Vibration.vibrate(pattern: [0, 200, 100, 300])
-            : Vibration.vibrate(duration: 120);
-      } else {
-        isError ? HapticFeedback.vibrate() : HapticFeedback.heavyImpact();
-      }
-      await _audio.play(AssetSource(asset));
-    } catch (e) {
-      if (kDebugMode) debugPrint('ApiConfigPage._play: $e');
-    }
   }
 
   // ── Dados ─────────────────────────────────────────────────────────────────
@@ -77,7 +55,7 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
 
     final deposito = _depositoController.text.trim();
     if (deposito.isEmpty) {
-      await _play('sounds/error_beep.mp3', isError: true);
+      await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
       StoxSnackbar.aviso(context, 'Informe o código do depósito padrão.');
       return;
@@ -89,7 +67,7 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
     await prefs.setString('sap_deposito_padrao', deposito.toUpperCase());
     await prefs.setBool('sap_allow_untrusted',   _permitirSslInseguro);
 
-    await _play('sounds/check.mp3');
+    await StoxAudio.play('sounds/check.mp3');
     if (!mounted) return;
     StoxSnackbar.sucesso(context, 'Configurações salvas com sucesso!');
     Navigator.pop(context);

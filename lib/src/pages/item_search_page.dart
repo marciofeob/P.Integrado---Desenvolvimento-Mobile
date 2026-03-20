@@ -1,15 +1,13 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:vibration/vibration.dart';
 
 import '../../app_stox.dart';
 import '../services/sap_service.dart';
 import '../services/ocr_service.dart';
+import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
 import 'etiqueta_page.dart';
 
@@ -26,7 +24,6 @@ class ItemSearchPage extends StatefulWidget {
 
 class _ItemSearchPageState extends State<ItemSearchPage> {
   final _searchController = TextEditingController();
-  final _audio            = AudioPlayer();
 
   Timer?                 _debounceTimer;
   Map<String, dynamic>?  _itemData;
@@ -85,31 +82,6 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     );
   }
 
-  // ── Feedback ──────────────────────────────────────────────────────────────
-
-  Future<void> _play(String asset,
-      {bool isError = false, bool isFail = false}) async {
-    try {
-      final temVibrador = await Vibration.hasVibrator();
-      if (temVibrador) {
-        if (isFail) {
-          Vibration.vibrate(pattern: [0, 400, 100, 400]);
-        } else if (isError) {
-          Vibration.vibrate(pattern: [0, 200, 100, 300]);
-        } else {
-          Vibration.vibrate(duration: 100);
-        }
-      } else {
-        (isFail || isError)
-            ? HapticFeedback.vibrate()
-            : HapticFeedback.lightImpact();
-      }
-      await _audio.play(AssetSource(asset));
-    } catch (e) {
-      if (kDebugMode) debugPrint('ItemSearchPage._play: $e');
-    }
-  }
-
   // ── Busca ─────────────────────────────────────────────────────────────────
 
   Future<void> _buscar({bool autoSearch = false}) async {
@@ -126,7 +98,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     final sessaoAtiva = await SapService.verificarSessao();
     if (!sessaoAtiva) {
       if (!autoSearch && mounted) {
-        await _play('sounds/error_beep.mp3', isError: true);
+        await StoxAudio.play('sounds/error_beep.mp3', isError: true);
         if (!mounted) return;
         StoxSnackbar.erro(
             context, 'Sessão SAP não encontrada. Faça login antes de pesquisar.');
@@ -154,7 +126,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
         }
       });
       if (results.isEmpty && !autoSearch) {
-        await _play('sounds/error_beep.mp3', isError: true);
+        await StoxAudio.play('sounds/error_beep.mp3', isError: true);
         if (!mounted) return;
         StoxSnackbar.aviso(context, "Nenhum item encontrado para '$termo'.");
       }
@@ -162,7 +134,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       if (!mounted) return;
       setState(() => _carregando = false);
       if (!autoSearch) {
-        await _play('sounds/fail.mp3', isFail: true);
+        await StoxAudio.play('sounds/fail.mp3', isFail: true);
         if (!mounted) return;
         StoxSnackbar.erro(context, 'Erro na busca: $e');
       }
@@ -179,11 +151,11 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
         _resultados = [];
         _carregando = false;
       });
-      await _play('sounds/beep.mp3');
+      await StoxAudio.play('sounds/beep.mp3');
     } catch (e) {
       if (!mounted) return;
       setState(() => _carregando = false);
-      await _play('sounds/fail.mp3', isFail: true);
+      await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;
       StoxSnackbar.erro(context, 'Erro ao carregar detalhes do item.');
     }
@@ -195,10 +167,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     if (!mounted) return;
     if (resultado != null && resultado['itemCode']!.isNotEmpty) {
       setState(() => _searchController.text = resultado['itemCode']!);
-      await _play('sounds/beep.mp3');
+      await StoxAudio.play('sounds/beep.mp3');
       _buscar();
     } else {
-      await _play('sounds/error_beep.mp3', isError: true);
+      await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
       StoxSnackbar.aviso(context, 'Nenhum código reconhecido pela câmera.');
     }
@@ -264,7 +236,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                           final code = barcodes.first.rawValue ?? '';
                           if (code.isEmpty) return;
                           _scannerAtivo = true;
-                          await _play('sounds/beep.mp3');
+                          await StoxAudio.play('sounds/beep.mp3');
                           if (!mounted) return;
                           _searchController.text = code;
                           // ignore: use_build_context_synchronously
@@ -656,7 +628,6 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   void dispose() {
     _debounceTimer?.cancel();
     _searchController.dispose();
-    _audio.dispose();
     super.dispose();
   }
 }

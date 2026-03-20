@@ -4,10 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:vibration/vibration.dart';
 
 import '../models/label_config.dart';
+import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
 
 /// Tela de preview e impressão de etiquetas térmicas via Bluetooth.
@@ -33,7 +32,6 @@ class EtiquetaPage extends StatefulWidget {
 class _EtiquetaPageState extends State<EtiquetaPage>
     with SingleTickerProviderStateMixin {
   final _bluetooth = BlueThermalPrinter.instance;
-  final _audio     = AudioPlayer();
 
   List<BluetoothDevice> _devices       = [];
   BluetoothDevice?      _selectedDevice;
@@ -69,33 +67,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     _cab2Controller.dispose();
     _rodapeController.dispose();
     _copiasController.dispose();
-    _audio.dispose();
     super.dispose();
-  }
-
-  // ── Feedback ──────────────────────────────────────────────────────────────
-
-  Future<void> _play(String asset,
-      {bool isError = false, bool isFail = false}) async {
-    try {
-      final temVibrador = await Vibration.hasVibrator();
-      if (temVibrador) {
-        if (isFail) {
-          Vibration.vibrate(pattern: [0, 400, 100, 400]);
-        } else if (isError) {
-          Vibration.vibrate(pattern: [0, 200, 100, 300]);
-        } else {
-          Vibration.vibrate(duration: 150);
-        }
-      } else {
-        (isFail || isError)
-            ? HapticFeedback.vibrate()
-            : HapticFeedback.heavyImpact();
-      }
-      await _audio.play(AssetSource(asset));
-    } catch (e) {
-      if (kDebugMode) debugPrint('EtiquetaPage._play: $e');
-    }
   }
 
   // ── Configuração ──────────────────────────────────────────────────────────
@@ -139,7 +111,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       copiasPorItem:   int.tryParse(_copiasController.text)?.clamp(1, 99) ?? 1,
     );
     await novaConfig.salvar();
-    await _play('sounds/check.mp3');
+    await StoxAudio.play('sounds/check.mp3');
     if (!mounted) return;
     setState(() => _config = novaConfig);
     StoxSnackbar.sucesso(context, 'Configurações salvas!');
@@ -150,7 +122,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
 
   Future<void> _imprimir() async {
     if (_selectedDevice == null) {
-      await _play('sounds/error_beep.mp3', isError: true);
+      await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
       StoxSnackbar.aviso(context, 'Selecione uma impressora primeiro.');
       return;
@@ -169,14 +141,14 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       for (final item in _itensParaImprimir) {
         for (int i = 0; i < _config.copiasPorItem; i++) {
           await _imprimirItem(item);
-          await _play('sounds/beep.mp3');
+          await StoxAudio.play('sounds/beep.mp3');
         }
         if (mounted) setState(() => _printedCount++);
       }
 
       await _bluetooth.disconnect();
 
-      await _play('sounds/check.mp3');
+      await StoxAudio.play('sounds/check.mp3');
       if (!mounted) return;
       final total = _itensParaImprimir.length * _config.copiasPorItem;
       StoxSnackbar.sucesso(
@@ -186,7 +158,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
             : 'Impressão enviada com sucesso!',
       );
     } catch (e) {
-      await _play('sounds/fail.mp3', isFail: true);
+      await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;
       StoxSnackbar.erro(context, 'Erro de impressão: $e');
     } finally {

@@ -1,13 +1,11 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:vibration/vibration.dart';
 
 import '../../app_stox.dart';
 import '../services/database_helper.dart';
 import '../services/sap_service.dart';
+import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
 import 'login_page.dart';
 import 'contador_offline_page.dart';
@@ -30,43 +28,11 @@ class _HomePageState extends State<HomePage> {
   bool                       _iniciando    = true;
   bool                       _carregando   = false;
   String                     _nomeOperador = 'Operador...';
-  final _audio = AudioPlayer();
 
   @override
   void initState() {
     super.initState();
     _carregarDadosIniciais();
-  }
-
-  @override
-  void dispose() {
-    _audio.dispose();
-    super.dispose();
-  }
-
-  // ── Feedback ──────────────────────────────────────────────────────────────
-
-  Future<void> _play(String asset,
-      {bool isError = false, bool isFail = false}) async {
-    try {
-      final temVibrador = await Vibration.hasVibrator();
-      if (temVibrador) {
-        if (isFail) {
-          Vibration.vibrate(pattern: [0, 400, 100, 400]);
-        } else if (isError) {
-          Vibration.vibrate(pattern: [0, 200, 100, 300]);
-        } else {
-          Vibration.vibrate(duration: 300);
-        }
-      } else {
-        (isFail || isError)
-            ? HapticFeedback.vibrate()
-            : HapticFeedback.heavyImpact();
-      }
-      await _audio.play(AssetSource(asset));
-    } catch (e) {
-      if (kDebugMode) debugPrint('HomePage._play: $e');
-    }
   }
 
   // ── Dados ─────────────────────────────────────────────────────────────────
@@ -101,18 +67,18 @@ class _HomePageState extends State<HomePage> {
       final erro = await SapService.postInventoryCounting(_contagens);
 
       if (erro == null) {
-        await _play('sounds/check.mp3');
+        await StoxAudio.play('sounds/check.mp3');
         await DatabaseHelper.instance.limparContagens();
         await _carregarContagens();
         if (!mounted) return;
         StoxSnackbar.sucesso(context, 'Sincronização concluída com sucesso!');
       } else {
-        await _play('sounds/fail.mp3', isFail: true);
+        await StoxAudio.play('sounds/fail.mp3', isFail: true);
         if (!mounted) return;
         _exibirErroSap(erro);
       }
     } catch (e) {
-      await _play('sounds/fail.mp3', isFail: true);
+      await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;
       StoxSnackbar.erro(context, 'Sem conexão com o servidor SAP. Tente novamente.');
     } finally {

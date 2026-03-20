@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'src/pages/splash_page.dart';
+import 'src/pages/login_page.dart';
 import 'src/widgets/stox_theme.dart';
 
 /// Raiz da aplicação STOX.
 ///
 /// Configura o [MaterialApp] com o tema SAP Fiori ([StoxTheme.lightTheme]),
-/// define [SplashPage] como rota inicial e aplica transição padrão
+/// define [LoginPage] como rota inicial e aplica transição padrão
 /// (slide 4% + fade, 300ms) em todas as navegações via [onGenerateRoute].
 class StoxApp extends StatelessWidget {
   const StoxApp({super.key});
@@ -17,7 +17,7 @@ class StoxApp extends StatelessWidget {
       title:                     'STOX - Inventário',
       debugShowCheckedModeBanner: false,
       theme:                     StoxTheme.lightTheme,
-      home:                      const SplashPage(),
+      home:                      const LoginPage(),
       onGenerateRoute:           _gerarRota,
     );
   }

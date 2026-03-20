@@ -38,8 +38,14 @@ Future<void> main() async {
     DeviceOrientation.portraitUp,
   ]);
 
-  // ── SSL ──
   final prefs = await SharedPreferences.getInstance();
+
+  // ── Limpar sessão SAP ao iniciar (exige login a cada abertura) ──
+  await prefs.remove('B1SESSION');
+  await prefs.remove('ROUTEID');
+  await prefs.remove('UserName');
+
+  // ── SSL ──
   SecureHttpOverrides.allowUntrusted =
       prefs.getBool('sap_allow_untrusted') ?? true;
   HttpOverrides.global = SecureHttpOverrides();

@@ -1,14 +1,12 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:vibration/vibration.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/database_helper.dart';
 import '../services/export_service.dart';
 import '../services/ocr_service.dart';
+import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
 
 /// Tela de contagem de estoque offline.
@@ -27,7 +25,6 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   final _quantidadeController = TextEditingController(text: '1');
   final _depositoController   = TextEditingController(text: '01');
   final _focusNodeCodigo      = FocusNode();
-  final _audio                = AudioPlayer();
 
   List<Map<String, dynamic>> _contagens    = [];
   bool                       _iniciando    = true;
@@ -48,33 +45,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     _quantidadeController.dispose();
     _depositoController.dispose();
     _focusNodeCodigo.dispose();
-    _audio.dispose();
     super.dispose();
-  }
-
-  // ── Feedback ──────────────────────────────────────────────────────────────
-
-  Future<void> _play(String asset,
-      {bool isError = false, bool isFail = false}) async {
-    try {
-      final temVibrador = await Vibration.hasVibrator();
-      if (temVibrador) {
-        if (isFail) {
-          Vibration.vibrate(pattern: [0, 400, 100, 400]);
-        } else if (isError) {
-          Vibration.vibrate(pattern: [0, 200, 100, 300]);
-        } else {
-          Vibration.vibrate(duration: 100);
-        }
-      } else {
-        (isFail || isError)
-            ? HapticFeedback.vibrate()
-            : HapticFeedback.lightImpact();
-      }
-      await _audio.play(AssetSource(asset));
-    } catch (e) {
-      if (kDebugMode) debugPrint('ContadorOfflinePage._play: $e');
-    }
   }
 
   // ── Dados ─────────────────────────────────────────────────────────────────
@@ -158,7 +129,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       for (final id in _selecionados) {
         await DatabaseHelper.instance.excluirContagem(id);
       }
-      await _play('sounds/check.mp3');
+      await StoxAudio.play('sounds/check.mp3');
       _sairModoSelecao();
       await _carregarContagens();
       if (!mounted) return;
@@ -167,7 +138,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         '$qtd ${qtd == 1 ? 'registro removido' : 'registros removidos'} com sucesso.',
       );
     } catch (e) {
-      await _play('sounds/fail.mp3', isFail: true);
+      await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;
       StoxSnackbar.erro(context, 'Erro ao excluir: $e');
     }
@@ -187,7 +158,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
 
   Future<bool> _exibirDialogoDuplicata(
       Map<String, dynamic> existente, double novaQuantidade) async {
-    await _play('sounds/error_beep.mp3', isError: true);
+    await StoxAudio.play('sounds/error_beep.mp3', isError: true);
     if (!mounted) return false;
 
     final resultado = await showDialog<bool>(
@@ -322,18 +293,18 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   Future<void> _exportarRelatorio() async {
     HapticFeedback.lightImpact();
     if (_contagens.isEmpty) {
-      await _play('sounds/error_beep.mp3', isError: true);
+      await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
       StoxSnackbar.aviso(context, 'Nenhuma contagem para exportar!');
       return;
     }
     try {
       await ExportService.exportarContagensParaCSV(_contagens);
-      await _play('sounds/check.mp3');
+      await StoxAudio.play('sounds/check.mp3');
       if (!mounted) return;
       StoxSnackbar.sucesso(context, 'Relatório exportado com sucesso!');
     } catch (e) {
-      await _play('sounds/fail.mp3', isFail: true);
+      await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;
       StoxSnackbar.erro(context, 'Erro ao exportar: $e');
     }
@@ -353,12 +324,12 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
           _quantidadeController.text = resultado['quantidade']!;
         }
       });
-      await _play('sounds/beep.mp3');
+      await StoxAudio.play('sounds/beep.mp3');
       if (!mounted) return;
       StoxSnackbar.sucesso(context, 'Leitura via IA concluída!');
       _focusNodeCodigo.nextFocus();
     } else {
-      await _play('sounds/error_beep.mp3', isError: true);
+      await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
       StoxSnackbar.aviso(context, 'Nenhum texto reconhecido.');
     }
@@ -426,7 +397,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                           if (barcodes.isEmpty) return;
                           _scannerAtivo = true;
                           final code = barcodes.first.rawValue ?? '';
-                          await _play('sounds/beep.mp3');
+                          await StoxAudio.play('sounds/beep.mp3');
                           if (!mounted) return;
                           _codigoController.text = code;
                           // ignore: use_build_context_synchronously
@@ -492,19 +463,19 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         double.tryParse(_quantidadeController.text.replaceAll(',', '.'));
 
     if (itemCode.isEmpty) {
-      await _play('sounds/error_beep.mp3', isError: true);
+      await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
       StoxSnackbar.aviso(context, 'O código do item é obrigatório.');
       return;
     }
     if (deposito.isEmpty) {
-      await _play('sounds/error_beep.mp3', isError: true);
+      await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
       StoxSnackbar.aviso(context, 'Informe o código do depósito.');
       return;
     }
     if (quantidade == null || quantidade <= 0) {
-      await _play('sounds/error_beep.mp3', isError: true);
+      await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
       StoxSnackbar.erro(context, 'Informe uma quantidade válida e maior que zero.');
       return;
@@ -517,7 +488,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       try {
         await DatabaseHelper.instance
             .atualizarContagem(duplicata['id'], quantidade);
-        await _play('sounds/check.mp3');
+        await StoxAudio.play('sounds/check.mp3');
         if (!mounted) return;
         StoxSnackbar.sucesso(context, 'Contagem de $itemCode atualizada!');
         _codigoController.clear();
@@ -525,7 +496,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         await _carregarContagens();
         _focusNodeCodigo.requestFocus();
       } catch (e) {
-        await _play('sounds/fail.mp3', isFail: true);
+        await StoxAudio.play('sounds/fail.mp3', isFail: true);
         if (!mounted) return;
         StoxSnackbar.erro(context, 'Erro ao atualizar: $e');
       }
@@ -538,7 +509,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         quantidade,
         warehouseCode: deposito,
       );
-      await _play('sounds/check.mp3');
+      await StoxAudio.play('sounds/check.mp3');
       if (!mounted) return;
       StoxSnackbar.sucesso(context, 'Item $itemCode salvo com sucesso!');
       _codigoController.clear();
@@ -546,7 +517,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       await _carregarContagens();
       _focusNodeCodigo.requestFocus();
     } catch (e) {
-      await _play('sounds/fail.mp3', isFail: true);
+      await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;
       StoxSnackbar.erro(context, 'Erro ao salvar: $e');
     }
@@ -641,13 +612,13 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                 final novoDeposito = editDepController.text.trim();
 
                 if (novaQtd <= 0) {
-                  await _play('sounds/error_beep.mp3', isError: true);
+                  await StoxAudio.play('sounds/error_beep.mp3', isError: true);
                   if (!mounted) return;
                   StoxSnackbar.erro(context, 'Quantidade inválida.');
                   return;
                 }
                 if (novoDeposito.isEmpty) {
-                  await _play('sounds/error_beep.mp3', isError: true);
+                  await StoxAudio.play('sounds/error_beep.mp3', isError: true);
                   if (!mounted) return;
                   StoxSnackbar.aviso(context, 'Informe o depósito.');
                   return;
@@ -666,7 +637,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                   whereArgs: [item['id']],
                 );
 
-                await _play('sounds/check.mp3');
+                await StoxAudio.play('sounds/check.mp3');
                 if (!mounted) return;
                 // ignore: use_build_context_synchronously
                 Navigator.pop(dialogCtx);

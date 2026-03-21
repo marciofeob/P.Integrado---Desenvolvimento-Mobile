@@ -168,10 +168,9 @@ class _EtiquetaPageState extends State<EtiquetaPage>
 
   /// Envia os comandos ESC/POS de um item para a impressora Bluetooth.
   Future<void> _imprimirItem(Map<String, dynamic> item) async {
-    final codigo  = item['ItemCode']?.toString()    ?? '000';
-    final nome    = item['ItemName']?.toString()    ?? '';
-    final dep     = item['_deposito']?.toString()   ?? widget.deposito;
-    final unidade = item['InventoryUOM']?.toString() ?? '';
+    final codigo = item['ItemCode']?.toString()  ?? '000';
+    final nome   = item['ItemName']?.toString()  ?? '';
+    final dep    = item['_deposito']?.toString() ?? widget.deposito;
 
     _bluetooth.printNewLine();
     if (_config.mostrarCabecalho && _config.cabecalhoLinha1.isNotEmpty) {
@@ -193,11 +192,9 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     }
     _bluetooth.printNewLine();
 
-    final infoLinha = [
-      if (_config.mostrarDeposito) 'DEP: $dep',
-      if (_config.mostrarUnidade && unidade.isNotEmpty) 'UM: $unidade',
-    ].join('  ');
-    if (infoLinha.isNotEmpty) _bluetooth.printCustom(infoLinha, 0, 1);
+    if (_config.mostrarDeposito) {
+      _bluetooth.printCustom('DEP: $dep', 0, 1);
+    }
 
     if (_config.mostrarRodape && _config.rodapeTexto.isNotEmpty) {
       _bluetooth.printCustom(_config.rodapeTexto, 0, 1);
@@ -406,8 +403,6 @@ class _EtiquetaPageState extends State<EtiquetaPage>
               (v) => setState(() => _config = _config.copyWith(mostrarCodigoTexto: v))),
           _switchItem('Depósito', _config.mostrarDeposito,
               (v) => setState(() => _config = _config.copyWith(mostrarDeposito: v))),
-          _switchItem('Unidade de medida', _config.mostrarUnidade,
-              (v) => setState(() => _config = _config.copyWith(mostrarUnidade: v))),
           const SizedBox(height: 8),
           const Divider(),
 

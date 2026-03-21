@@ -299,10 +299,13 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       return;
     }
     try {
-      await ExportService.exportarContagensParaCSV(_contagens);
-      await StoxAudio.play('sounds/check.mp3');
+      final exportado = await ExportService.exportarContagensParaCSV(_contagens);
       if (!mounted) return;
-      StoxSnackbar.sucesso(context, 'Relatório exportado com sucesso!');
+      if (exportado) {
+        await StoxAudio.play('sounds/check.mp3');
+        if (!mounted) return;
+        StoxSnackbar.sucesso(context, 'Relatório exportado com sucesso!');
+      }
     } catch (e) {
       await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;

@@ -11,10 +11,14 @@ import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
 import 'etiqueta_page.dart';
 
+/// Filtro de status dos itens na busca.
+enum _FiltroItem { todos, ativos, bloqueados }
+
 /// Tela de consulta de itens no SAP Business One.
 ///
-/// Permite busca por código ou nome, exibe detalhes completos do item
-/// e gerencia uma fila de impressão de etiquetas.
+/// Permite busca por código ou nome, filtragem por status,
+/// exibe detalhes completos do item e gerencia uma fila de
+/// impressão de etiquetas.
 class ItemSearchPage extends StatefulWidget {
   const ItemSearchPage({super.key});
 
@@ -30,6 +34,7 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
   List<dynamic>          _resultados   = [];
   bool                   _carregando   = false;
   bool                   _scannerAtivo = false;
+  _FiltroItem            _filtro       = _FiltroItem.todos;
 
   // ── Carrinho de impressão ─────────────────────────────────────────────────
 
@@ -80,6 +85,18 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
         },
       ),
     );
+  }
+
+  // ── Filtro ────────────────────────────────────────────────────────────────
+
+  /// Aplica o filtro atual sobre a lista de resultados brutos.
+  List<dynamic> get _resultadosFiltrados {
+    if (_filtro == _FiltroItem.todos) return _resultados;
+    return _resultados.where((item) {
+      final frozen = item['Frozen'] ?? 'tNO';
+      if (_filtro == _FiltroItem.bloqueados) return frozen == 'tYES';
+      return frozen != 'tYES';
+    }).toList();
   }
 
   // ── Busca ─────────────────────────────────────────────────────────────────
@@ -313,7 +330,6 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
       ),
       body: SafeArea(
         child: Column(children: [
-          // ── Linear loading durante busca ──
           if (_carregando) const StoxLinearLoading(),
 
           StoxSearchBar(
@@ -328,7 +344,12 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
               });
             },
           ),
-          if (!_carregando && _resultados.isNotEmpty)
+
+          // ── Chips de filtro (só aparecem com resultados) ──
+          if (!_carregando && _resultados.length > 1)
+            _buildFiltroChips(),
+
+          if (!_carregando && _resultadosFiltrados.isNotEmpty)
             _buildSugestoesBusca(),
           if (!_carregando && _itemData != null)
             _buildDetalheItem(),
@@ -352,17 +373,68 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
     );
   }
 
+  // ── Chips de filtro ───────────────────────────────────────────────────────
+
+  Widget _buildFiltroChips() {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(children: [
+        _buildChip('Todos',      _FiltroItem.todos,      theme),
+        const SizedBox(width: 8),
+        _buildChip('Ativos',     _FiltroItem.ativos,     theme),
+        const SizedBox(width: 8),
+        _buildChip('Bloqueados', _FiltroItem.bloqueados, theme),
+        const Spacer(),
+        Text(
+          '${_resultadosFiltrados.length} resultado${_resultadosFiltrados.length != 1 ? 's' : ''}',
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildChip(String label, _FiltroItem valor, ThemeData theme) {
+    final selecionado = _filtro == valor;
+    return FilterChip(
+      label: Text(label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: selecionado ? Colors.white : Colors.grey.shade700,
+          )),
+      selected: selecionado,
+      onSelected: (_) {
+        HapticFeedback.selectionClick();
+        setState(() => _filtro = valor);
+      },
+      selectedColor: theme.primaryColor,
+      backgroundColor: Colors.grey.shade100,
+      checkmarkColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: selecionado ? theme.primaryColor : Colors.grey.shade300,
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
   // ── Subwidgets ────────────────────────────────────────────────────────────
 
   Widget _buildSugestoesBusca() {
-    final theme = Theme.of(context);
+    final theme    = Theme.of(context);
+    final filtrado = _resultadosFiltrados;
+
     return Expanded(
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-        itemCount: _resultados.length,
+        itemCount: filtrado.length,
         separatorBuilder: (_, _) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
-          final item       = _resultados[index] as Map<String, dynamic>;
+          final item       = filtrado[index] as Map<String, dynamic>;
           final code       = item['ItemCode'] as String;
           final noCarrinho = _estaNoCarrinho(code);
 
@@ -634,7 +706,6 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
 
 // ── Sheet do carrinho de impressão ───────────────────────────────────────────
 
-/// Bottom sheet com estado próprio para gerenciar a fila de impressão.
 class _CarrinhoSheet extends StatefulWidget {
   final Map<String, Map<String, dynamic>> carrinho;
   final Color        primaryColor;

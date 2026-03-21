@@ -157,6 +157,12 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
                 onPressed: _salvarConfig,
               ),
 
+              const SizedBox(height: 48),
+              Text(
+                'STOX v1.0.0',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+              ),
               const SizedBox(height: 20),
             ],
           ),

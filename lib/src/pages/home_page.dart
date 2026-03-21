@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app_stox.dart';
 import '../services/database_helper.dart';
+import '../services/export_service.dart';
 import '../services/sap_service.dart';
 import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
@@ -14,8 +15,9 @@ import 'item_search_page.dart';
 
 /// Painel principal do STOX.
 ///
-/// Exibe as contagens offline pendentes, permite sincronizar com o
-/// SAP Business One e navega para as demais telas via Drawer.
+/// Exibe as contagens offline pendentes, ações rápidas em grid,
+/// permite sincronizar com o SAP Business One e navega para as
+/// demais telas via Drawer.
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -24,10 +26,11 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  List<Map<String, dynamic>> _contagens    = [];
-  bool                       _iniciando    = true;
-  bool                       _carregando   = false;
-  String                     _nomeOperador = 'Operador...';
+  List<Map<String, dynamic>> _contagens = [];
+  bool _iniciando = true;
+  bool _carregando = false;
+  String _nomeOperador = 'Operador...';
+  bool _sapConectado = false;
 
   @override
   void initState() {
@@ -38,13 +41,19 @@ class _HomePageState extends State<HomePage> {
   // ── Dados ─────────────────────────────────────────────────────────────────
 
   Future<void> _carregarDadosIniciais() async {
-    await Future.wait([_carregarContagens(), _carregarUsuario()]);
+    await Future.wait([
+      _carregarContagens(),
+      _carregarUsuario(),
+      _verificarConexaoSap(),
+    ]);
   }
 
   Future<void> _carregarUsuario() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() => _nomeOperador = prefs.getString('UserName') ?? 'Operador STOX');
+    setState(
+      () => _nomeOperador = prefs.getString('UserName') ?? 'Operador STOX',
+    );
   }
 
   Future<void> _carregarContagens() async {
@@ -54,6 +63,37 @@ class _HomePageState extends State<HomePage> {
       _contagens = dados;
       _iniciando = false;
     });
+  }
+
+  Future<void> _verificarConexaoSap() async {
+    final conectado = await SapService.verificarSessao();
+    if (!mounted) return;
+    setState(() => _sapConectado = conectado);
+  }
+
+  // ── Exportação ────────────────────────────────────────────────────────────
+
+  Future<void> _exportarRelatorio() async {
+    HapticFeedback.lightImpact();
+    if (_contagens.isEmpty) {
+      StoxSnackbar.aviso(context, 'Nenhuma contagem para exportar.');
+      return;
+    }
+    try {
+      final exportado = await ExportService.exportarContagensParaCSV(
+        _contagens,
+      );
+      if (!mounted) return;
+      if (exportado) {
+        await StoxAudio.play('sounds/check.mp3');
+        if (!mounted) return;
+        StoxSnackbar.sucesso(context, 'Relatório exportado com sucesso!');
+      }
+    } catch (e) {
+      await StoxAudio.play('sounds/fail.mp3', isFail: true);
+      if (!mounted) return;
+      StoxSnackbar.erro(context, 'Erro ao exportar: $e');
+    }
   }
 
   // ── Sincronização ─────────────────────────────────────────────────────────
@@ -80,7 +120,10 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;
-      StoxSnackbar.erro(context, 'Sem conexão com o servidor SAP. Tente novamente.');
+      StoxSnackbar.erro(
+        context,
+        'Sem conexão com o servidor SAP. Tente novamente.',
+      );
     } finally {
       if (mounted) setState(() => _carregando = false);
     }
@@ -88,26 +131,23 @@ class _HomePageState extends State<HomePage> {
 
   // ── Erros SAP ─────────────────────────────────────────────────────────────
 
-  /// Classifica a mensagem de erro bruta do SAP em uma categoria amigável
-  /// usando um sistema de pontuação por palavras-chave.
   _ErroSap _interpretarErroSap(String mensagemBruta) {
-    final msg     = mensagemBruta.toUpperCase();
+    final msg = mensagemBruta.toUpperCase();
     final tecnico = mensagemBruta.length > 300
         ? '${mensagemBruta.substring(0, 300)}...'
         : mensagemBruta;
 
-    String itemEncontrado     = '';
+    String itemEncontrado = '';
     String depositoEncontrado = '';
     for (final c in _contagens) {
       final codigo = c['itemCode'].toString().trim().toUpperCase();
       if (msg.contains(codigo)) {
-        itemEncontrado     = c['itemCode'].toString().trim();
+        itemEncontrado = c['itemCode'].toString().trim();
         depositoEncontrado = c['warehouseCode']?.toString().trim() ?? '';
         break;
       }
     }
 
-    // Contagem já aberta
     if (mensagemBruta.contains('-1310') ||
         mensagemBruta.contains('1470000497') ||
         msg.contains('ALREADY')) {
@@ -124,8 +164,9 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // Sessão expirada
-    if (msg.contains('SESSION') || msg.contains('401') || msg.contains('UNAUTHORIZED')) {
+    if (msg.contains('SESSION') ||
+        msg.contains('401') ||
+        msg.contains('UNAUTHORIZED')) {
       return _ErroSap(
         icone: Icons.lock_rounded,
         cor: Colors.red.shade700,
@@ -137,8 +178,9 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // Falha de rede
-    if (msg.contains('TIMEOUT') || msg.contains('CONNECTION') || msg.contains('SOCKET')) {
+    if (msg.contains('TIMEOUT') ||
+        msg.contains('CONNECTION') ||
+        msg.contains('SOCKET')) {
       return _ErroSap(
         icone: Icons.wifi_off_rounded,
         cor: Colors.red.shade700,
@@ -149,27 +191,29 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // Pontuação por palavras-chave para classificar item vs depósito
-    int pontoItem     = 0;
+    int pontoItem = 0;
     int pontoDeposito = 0;
 
-    if (msg.contains('-4002'))                              pontoItem += 10;
-    if (msg.contains('ITEM NOT FOUND'))                     pontoItem += 8;
-    if (msg.contains('INVALID ITEM'))                       pontoItem += 8;
-    if (msg.contains('ITEM') && msg.contains('NOT EXIST'))  pontoItem += 7;
-    if (msg.contains('ITEM') && msg.contains('NOT FOUND'))  pontoItem += 6;
-    if (msg.contains('ITEM') && msg.contains('INVALID'))    pontoItem += 5;
-    if (msg.contains('ITEM CODE'))                          pontoItem += 4;
-    if (msg.contains('ITEM') && msg.contains('UNKNOWN'))    pontoItem += 4;
-    if (itemEncontrado.isNotEmpty)                          pontoItem += 3;
+    if (msg.contains('-4002')) pontoItem += 10;
+    if (msg.contains('ITEM NOT FOUND')) pontoItem += 8;
+    if (msg.contains('INVALID ITEM')) pontoItem += 8;
+    if (msg.contains('ITEM') && msg.contains('NOT EXIST')) pontoItem += 7;
+    if (msg.contains('ITEM') && msg.contains('NOT FOUND')) pontoItem += 6;
+    if (msg.contains('ITEM') && msg.contains('INVALID')) pontoItem += 5;
+    if (msg.contains('ITEM CODE')) pontoItem += 4;
+    if (msg.contains('ITEM') && msg.contains('UNKNOWN')) pontoItem += 4;
+    if (itemEncontrado.isNotEmpty) pontoItem += 3;
 
-    if (msg.contains('-5002'))                                       pontoDeposito += 10;
-    if (msg.contains('WAREHOUSE NOT FOUND'))                         pontoDeposito += 8;
-    if (msg.contains('INVALID WAREHOUSE'))                           pontoDeposito += 8;
-    if (msg.contains('WAREHOUSE') && msg.contains('NOT FOUND'))      pontoDeposito += 6;
-    if (msg.contains('WAREHOUSE') && msg.contains('INVALID'))        pontoDeposito += 5;
-    if (msg.contains('WAREHOUSECODE') && msg.contains('NOT FOUND'))  pontoDeposito += 6;
-    if (msg.contains('WAREHOUSE') && pontoDeposito == 0)             pontoDeposito += 1;
+    if (msg.contains('-5002')) pontoDeposito += 10;
+    if (msg.contains('WAREHOUSE NOT FOUND')) pontoDeposito += 8;
+    if (msg.contains('INVALID WAREHOUSE')) pontoDeposito += 8;
+    if (msg.contains('WAREHOUSE') && msg.contains('NOT FOUND'))
+      pontoDeposito += 6;
+    if (msg.contains('WAREHOUSE') && msg.contains('INVALID'))
+      pontoDeposito += 5;
+    if (msg.contains('WAREHOUSECODE') && msg.contains('NOT FOUND'))
+      pontoDeposito += 6;
+    if (msg.contains('WAREHOUSE') && pontoDeposito == 0) pontoDeposito += 1;
 
     if (pontoItem > pontoDeposito && pontoItem > 0) {
       return _ErroSap(
@@ -199,7 +243,6 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // Fallback genérico
     return _ErroSap(
       icone: Icons.error_outline_rounded,
       cor: Colors.red.shade700,
@@ -222,57 +265,74 @@ class _HomePageState extends State<HomePage> {
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        title: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
                 color: erro.cor.withAlpha(26),
-                borderRadius: BorderRadius.circular(8)),
-            child: Icon(erro.icone, color: erro.cor, size: 24),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(erro.titulo,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(erro.icone, color: erro.cor, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                erro.titulo,
                 style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade900)),
-          ),
-        ]),
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade900,
+                ),
+              ),
+            ),
+          ],
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 12),
-              Text(erro.mensagem,
-                  style: const TextStyle(fontSize: 14, height: 1.5)),
+              Text(
+                erro.mensagem,
+                style: const TextStyle(fontSize: 14, height: 1.5),
+              ),
               const SizedBox(height: 16),
               StoxCard(
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline_rounded,
-                        color: Colors.blue.shade700, size: 18),
+                    Icon(
+                      Icons.info_outline_rounded,
+                      color: Colors.blue.shade700,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(erro.orientacao,
-                          style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.blue.shade800,
-                              height: 1.4)),
+                      child: Text(
+                        erro.orientacao,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.blue.shade800,
+                          height: 1.4,
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
               if (erro.codigoTecnico != null) ...[
                 const SizedBox(height: 12),
-                Text('Retorno do SAP:',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey.shade600)),
+                Text(
+                  'Retorno do SAP:',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 StoxCard(
                   borderColor: Colors.grey.shade300,
@@ -281,10 +341,11 @@ class _HomePageState extends State<HomePage> {
                     child: SelectableText(
                       erro.codigoTecnico!,
                       style: TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 10,
-                          color: Colors.blueGrey.shade700,
-                          height: 1.5),
+                        fontFamily: 'monospace',
+                        fontSize: 10,
+                        color: Colors.blueGrey.shade700,
+                        height: 1.5,
+                      ),
                     ),
                   ),
                 ),
@@ -299,8 +360,10 @@ class _HomePageState extends State<HomePage> {
               label: 'IR PARA CONFIGURAÇÕES',
               onPressed: () {
                 Navigator.pop(context);
-                Navigator.push(context,
-                    StoxApp.transicaoPadrao(const ApiConfigPage()));
+                Navigator.push(
+                  context,
+                  StoxApp.transicaoPadrao(const ApiConfigPage()),
+                );
               },
             ),
           ElevatedButton(
@@ -320,7 +383,8 @@ class _HomePageState extends State<HomePage> {
               foregroundColor: Colors.white,
               minimumSize: const Size(100, 40),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
             child: Text(
               erro.titulo.contains('expirada') ? 'FAZER LOGIN' : 'ENTENDIDO',
@@ -338,8 +402,10 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Painel STOX',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Painel STOX',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         elevation: 0,
         actions: [
           IconButton(
@@ -347,214 +413,450 @@ class _HomePageState extends State<HomePage> {
             tooltip: 'Recarregar',
             onPressed: () {
               HapticFeedback.lightImpact();
-              _carregarContagens();
+              _carregarDadosIniciais();
             },
           ),
         ],
       ),
       drawer: _buildDrawer(),
       body: SafeArea(
-        child: Column(children: [
-          // ── Linear loading durante sincronização ──
-          if (_carregando) const StoxLinearLoading(),
+        child: Column(
+          children: [
+            if (_carregando) const StoxLinearLoading(),
 
-          StoxSummaryCard(
-            totalItens:    _contagens.length,
-            carregando:    _carregando,
-            onSincronizar: _sincronizarComSAP,
-          ),
-
-          // ── Skeleton no primeiro carregamento ──
-          if (_iniciando)
-            const StoxSkeletonList(quantidade: 5)
-          else if (_contagens.isEmpty)
-            Expanded(child: _buildEmptyState())
-          else
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: _buildListaContagens(),
-              ),
+            StoxSummaryCard(
+              totalItens: _contagens.length,
+              carregando: _carregando,
+              onSincronizar: _sincronizarComSAP,
             ),
-        ]),
+
+            if (_iniciando)
+              const StoxSkeletonList(quantidade: 5)
+            else
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 80),
+                  children: [
+                    // ── Quick Actions ──
+                    _buildQuickActions(),
+                    const SizedBox(height: 24),
+
+                    // ── Lista de contagens ou estado vazio ──
+                    if (_contagens.isEmpty)
+                      _buildEmptyState()
+                    else ...[
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.history_rounded,
+                            color: Colors.grey.shade500,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Contagens pendentes',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Colors.grey.shade800,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${_contagens.length} itens',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      ..._contagens.map(_buildItemContagem),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  // ── Subwidgets do Build ───────────────────────────────────────────────────
+  // ── Quick Actions Grid ────────────────────────────────────────────────────
 
-  Widget _buildListaContagens() => ListView.builder(
-        key: ValueKey(_contagens.length),
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 80),
-        itemCount: _contagens.length,
-        itemBuilder: (context, index) {
-          final item     = _contagens[index];
-          final deposito = item['warehouseCode'] ?? '01';
+  Widget _buildQuickActions() {
+    final theme = Theme.of(context);
 
-          return StoxCard(
-            child: ListTile(
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              leading: CircleAvatar(
-                backgroundColor: Theme.of(context).primaryColor.withAlpha(26),
-                radius: 22,
-                child: Icon(Icons.inventory_2_rounded,
-                    color: Theme.of(context).primaryColor, size: 22),
-              ),
-              title: Text(
-                '${item['itemCode']}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Qtd: ${item['quantidade']}  •  Dep: $deposito',
-                  style: TextStyle(color: Colors.grey.shade700),
-                ),
-              ),
-              trailing: IconButton(
-                icon: Icon(Icons.delete_outline_rounded,
-                    color: Colors.red.shade400),
-                onPressed: () async {
-                  HapticFeedback.vibrate();
-                  await DatabaseHelper.instance.excluirContagem(item['id']);
-                  _carregarContagens();
-                },
-              ),
-            ),
-          );
-        },
-      );
-
-  Widget _buildEmptyState() => Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                  color: Colors.green.shade50, shape: BoxShape.circle),
-              child: Icon(Icons.cloud_done_rounded,
-                  size: 64, color: Colors.green.shade400),
+            Text(
+              'Ações Rápidas',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+                color: Colors.grey.shade800,
+              ),
             ),
-            const SizedBox(height: 24),
-            Text('Tudo sincronizado!',
-                style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade800)),
-            const SizedBox(height: 8),
-            Text('Não há contagens pendentes para envio.',
-                style: TextStyle(color: Colors.grey.shade600)),
+            const Spacer(),
+            _buildChipConexao(),
           ],
         ),
-      );
-
-  Widget _buildDrawer() {
-    final theme = Theme.of(context);
-    return Drawer(
-      child: Column(children: [
-        UserAccountsDrawerHeader(
-          decoration: BoxDecoration(color: theme.primaryColor),
-          currentAccountPicture: const CircleAvatar(
-            backgroundColor: Colors.white,
-            child: Icon(Icons.person_rounded, size: 40, color: Colors.grey),
-          ),
-          accountName: Text(_nomeOperador,
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 16)),
-          accountEmail: const Row(children: [
-            Icon(Icons.check_circle, color: Colors.greenAccent, size: 14),
-            SizedBox(width: 6),
-            Text('SAP Business One Conectado'),
-          ]),
+        const SizedBox(height: 12),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1.6,
+          children: [
+            _buildActionCard(
+              icon: Icons.add_box_rounded,
+              label: 'Contagem',
+              sub: 'Modo offline',
+              cor: theme.primaryColor,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  StoxApp.transicaoPadrao(const ContadorOfflinePage()),
+                ).then((_) => _carregarContagens());
+              },
+            ),
+            _buildActionCard(
+              icon: Icons.search_rounded,
+              label: 'Pesquisar Item',
+              sub: 'Consulta SAP',
+              cor: Colors.teal.shade600,
+              onTap: () => Navigator.push(
+                context,
+                StoxApp.transicaoPadrao(const ItemSearchPage()),
+              ),
+            ),
+            _buildActionCard(
+              icon: Icons.share_rounded,
+              label: 'Exportar CSV',
+              sub: '${_contagens.length} registros',
+              cor: Colors.orange.shade700,
+              onTap: _exportarRelatorio,
+            ),
+            _buildActionCard(
+              icon: Icons.settings_rounded,
+              label: 'Configurações',
+              sub: 'API e depósito',
+              cor: Colors.grey.shade600,
+              onTap: () => Navigator.push(
+                context,
+                StoxApp.transicaoPadrao(const ApiConfigPage()),
+              ),
+            ),
+          ],
         ),
-        Expanded(
-          child: ListView(
-            padding: EdgeInsets.zero,
+      ],
+    );
+  }
+
+  Widget _buildActionCard({
+    required IconData icon,
+    required String label,
+    required String sub,
+    required Color cor,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cor.withAlpha(15),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: cor.withAlpha(40)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              ListTile(
-                leading: Icon(Icons.add_box_rounded, color: theme.primaryColor),
-                title: const Text('Nova Contagem Offline',
-                    style: TextStyle(fontWeight: FontWeight.w500)),
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    StoxApp.transicaoPadrao(const ContadorOfflinePage()),
-                  ).then((_) => _carregarContagens());
-                },
+              Icon(icon, color: cor, size: 28),
+              const Spacer(),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Colors.grey.shade900,
+                ),
               ),
-              ListTile(
-                leading: Icon(Icons.search_rounded, color: theme.primaryColor),
-                title: const Text('Pesquisar Item SAP',
-                    style: TextStyle(fontWeight: FontWeight.w500)),
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    StoxApp.transicaoPadrao(const ItemSearchPage()),
-                  );
-                },
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Divider(color: Colors.grey.shade200),
-              ),
-              ListTile(
-                leading: Icon(Icons.settings_rounded,
-                    color: Colors.grey.shade600),
-                title: Text('Configurações da API',
-                    style: TextStyle(
-                        color: Colors.grey.shade800,
-                        fontWeight: FontWeight.w500)),
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    StoxApp.transicaoPadrao(const ApiConfigPage()),
-                  );
-                },
+              const SizedBox(height: 2),
+              Text(
+                sub,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               ),
             ],
           ),
         ),
-        const Divider(height: 1),
-        ListTile(
-          leading: const Icon(Icons.logout_rounded, color: Colors.red),
-          title: const Text('Sair da Conta',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-          onTap: () async {
-            HapticFeedback.heavyImpact();
-            await SapService.logout();
-            if (!mounted) return;
-            Navigator.pushAndRemoveUntil(
-              context,
-              StoxApp.transicaoPadrao(const LoginPage()),
-              (r) => false,
-            );
+      ),
+    );
+  }
+
+  // ── Chip de conexão SAP ───────────────────────────────────────────────────
+
+  Widget _buildChipConexao() {
+    final conectado = _sapConectado;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: conectado ? Colors.green.shade50 : Colors.red.shade50,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: conectado ? Colors.green.shade200 : Colors.red.shade200,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            conectado ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+            size: 14,
+            color: conectado ? Colors.green.shade700 : Colors.red.shade700,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            conectado ? 'SAP Conectado' : 'Sem sessão',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: conectado ? Colors.green.shade700 : Colors.red.shade700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Subwidgets ────────────────────────────────────────────────────────────
+
+  Widget _buildItemContagem(Map<String, dynamic> item) {
+    final deposito = item['warehouseCode'] ?? '01';
+    return StoxCard(
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).primaryColor.withAlpha(26),
+          radius: 22,
+          child: Icon(
+            Icons.inventory_2_rounded,
+            color: Theme.of(context).primaryColor,
+            size: 22,
+          ),
+        ),
+        title: Text(
+          '${item['itemCode']}',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            'Qtd: ${item['quantidade']}  •  Dep: $deposito',
+            style: TextStyle(color: Colors.grey.shade700),
+          ),
+        ),
+        trailing: IconButton(
+          icon: Icon(Icons.delete_outline_rounded, color: Colors.red.shade400),
+          onPressed: () async {
+            HapticFeedback.vibrate();
+            await DatabaseHelper.instance.excluirContagem(item['id']);
+            _carregarContagens();
           },
         ),
-        const SizedBox(height: 24),
-      ]),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() => Padding(
+    padding: const EdgeInsets.only(top: 40),
+    child: Center(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.cloud_done_rounded,
+              size: 64,
+              color: Colors.green.shade400,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Tudo sincronizado!',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Não há contagens pendentes para envio.',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildDrawer() {
+    final theme = Theme.of(context);
+    return Drawer(
+      child: Column(
+        children: [
+          UserAccountsDrawerHeader(
+            decoration: BoxDecoration(color: theme.primaryColor),
+            currentAccountPicture: const CircleAvatar(
+              backgroundColor: Colors.white,
+              child: Icon(Icons.person_rounded, size: 40, color: Colors.grey),
+            ),
+            accountName: Text(
+              _nomeOperador,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            accountEmail: Row(
+              children: [
+                Icon(
+                  _sapConectado ? Icons.check_circle : Icons.cancel,
+                  color: _sapConectado ? Colors.greenAccent : Colors.redAccent,
+                  size: 14,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _sapConectado
+                      ? 'SAP Business One Conectado'
+                      : 'SAP Desconectado',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                ListTile(
+                  leading: Icon(
+                    Icons.add_box_rounded,
+                    color: theme.primaryColor,
+                  ),
+                  title: const Text(
+                    'Contagem Offline',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      StoxApp.transicaoPadrao(const ContadorOfflinePage()),
+                    ).then((_) => _carregarContagens());
+                  },
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.search_rounded,
+                    color: theme.primaryColor,
+                  ),
+                  title: const Text(
+                    'Pesquisar Item SAP',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      StoxApp.transicaoPadrao(const ItemSearchPage()),
+                    );
+                  },
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Divider(color: Colors.grey.shade200),
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.settings_rounded,
+                    color: Colors.grey.shade600,
+                  ),
+                  title: Text(
+                    'Configurações da API',
+                    style: TextStyle(
+                      color: Colors.grey.shade800,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      StoxApp.transicaoPadrao(const ApiConfigPage()),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.logout_rounded, color: Colors.red),
+            title: const Text(
+              'Sair da Conta',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
+            onTap: () async {
+              HapticFeedback.heavyImpact();
+              await SapService.logout();
+              if (!mounted) return;
+              Navigator.pushAndRemoveUntil(
+                context,
+                StoxApp.transicaoPadrao(const LoginPage()),
+                (r) => false,
+              );
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Text(
+              'STOX v1.0.0',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 // ── Modelo de erro amigável ───────────────────────────────────────────────────
 
-/// Encapsula os dados de exibição de um erro de sincronização SAP.
-/// Produzido por [_interpretarErroSap] e consumido por [_exibirErroSap].
 class _ErroSap {
   final IconData icone;
-  final Color    cor;
-  final String   titulo;
-  final String   mensagem;
-  final String   orientacao;
-  final String?  codigoTecnico;
+  final Color cor;
+  final String titulo;
+  final String mensagem;
+  final String orientacao;
+  final String? codigoTecnico;
 
   const _ErroSap({
     required this.icone,

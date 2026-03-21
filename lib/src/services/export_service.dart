@@ -7,8 +7,7 @@ import 'package:share_plus/share_plus.dart';
 /// Serviço de exportação de contagens para CSV.
 ///
 /// Gera um arquivo CSV compatível com Excel PT-BR (delimitador `;`,
-// ignore: deprecated_member_use
-/// encoding UTF-8 com BOM) e o compartilha via [Share.shareXFiles].
+/// encoding UTF-8 com BOM) e o compartilha via [SharePlus].
 class ExportService {
   ExportService._();
 
@@ -52,8 +51,10 @@ class ExportService {
 
   /// Gera e compartilha o relatório CSV das [contagens] fornecidas.
   ///
+  /// Retorna `true` se o usuário efetivamente compartilhou o arquivo,
+  /// ou `false` se cancelou/fechou o diálogo de compartilhamento.
   /// Lança exceção em caso de falha — o chamador deve tratar e exibir feedback.
-  static Future<void> exportarContagensParaCSV(
+  static Future<bool> exportarContagensParaCSV(
     List<Map<String, dynamic>> contagens,
   ) async {
     try {
@@ -83,12 +84,15 @@ class ExportService {
       final arquivo = File('${dir.path}/Relatorio_STOX_$tag.csv');
       await arquivo.writeAsString(conteudo);
 
-      // ignore: deprecated_member_use
-      await Share.shareXFiles(
-        [XFile(arquivo.path, mimeType: 'text/csv')],
-        text:    'Relatório de Contagem Offline - STOX',
-        subject: 'Relatório STOX - $tag',
+      final resultado = await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(arquivo.path, mimeType: 'text/csv')],
+          text:    'Relatório de Contagem Offline - STOX',
+          subject: 'Relatório STOX - $tag',
+        ),
       );
+
+      return resultado.status == ShareResultStatus.success;
     } catch (e) {
       if (kDebugMode) debugPrint('ExportService.exportarContagensParaCSV: $e');
       rethrow;

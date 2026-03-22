@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app_stox.dart';
@@ -31,11 +34,46 @@ class _HomePageState extends State<HomePage> {
   bool _carregando = false;
   String _nomeOperador = 'Operador...';
   bool _sapConectado = false;
+  bool _semInternet = false;
+
+  late StreamSubscription<List<ConnectivityResult>> _connectivitySub;
 
   @override
   void initState() {
     super.initState();
     _carregarDadosIniciais();
+    _iniciarMonitorConexao();
+  }
+
+  @override
+  void dispose() {
+    _connectivitySub.cancel();
+    super.dispose();
+  }
+
+  // ── Conectividade ─────────────────────────────────────────────────────────
+
+  void _iniciarMonitorConexao() {
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      final offline = results.every((r) => r == ConnectivityResult.none);
+      if (!mounted) return;
+      if (offline != _semInternet) {
+        setState(() => _semInternet = offline);
+        if (offline) {
+          StoxSnackbar.erro(context, 'Sem conexão com a internet.');
+        } else {
+          StoxSnackbar.sucesso(context, 'Conexão restabelecida!');
+          _verificarConexaoSap();
+        }
+      }
+    });
+
+    // Verifica estado inicial
+    Connectivity().checkConnectivity().then((results) {
+      if (!mounted) return;
+      final offline = results.every((r) => r == ConnectivityResult.none);
+      setState(() => _semInternet = offline);
+    });
   }
 
   // ── Dados ─────────────────────────────────────────────────────────────────
@@ -100,6 +138,10 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _sincronizarComSAP() async {
     if (_contagens.isEmpty) return;
+    if (_semInternet) {
+      StoxSnackbar.erro(context, 'Sem internet. Conecte-se para sincronizar.');
+      return;
+    }
     HapticFeedback.lightImpact();
     setState(() => _carregando = true);
 
@@ -194,26 +236,23 @@ class _HomePageState extends State<HomePage> {
     int pontoItem = 0;
     int pontoDeposito = 0;
 
-    if (msg.contains('-4002')) pontoItem += 10;
-    if (msg.contains('ITEM NOT FOUND')) pontoItem += 8;
-    if (msg.contains('INVALID ITEM')) pontoItem += 8;
-    if (msg.contains('ITEM') && msg.contains('NOT EXIST')) pontoItem += 7;
-    if (msg.contains('ITEM') && msg.contains('NOT FOUND')) pontoItem += 6;
-    if (msg.contains('ITEM') && msg.contains('INVALID')) pontoItem += 5;
-    if (msg.contains('ITEM CODE')) pontoItem += 4;
-    if (msg.contains('ITEM') && msg.contains('UNKNOWN')) pontoItem += 4;
-    if (itemEncontrado.isNotEmpty) pontoItem += 3;
+    if (msg.contains('-4002')) { pontoItem += 10; }
+    if (msg.contains('ITEM NOT FOUND')) { pontoItem += 8; }
+    if (msg.contains('INVALID ITEM')) { pontoItem += 8; }
+    if (msg.contains('ITEM') && msg.contains('NOT EXIST')) { pontoItem += 7; }
+    if (msg.contains('ITEM') && msg.contains('NOT FOUND')) { pontoItem += 6; }
+    if (msg.contains('ITEM') && msg.contains('INVALID')) { pontoItem += 5; }
+    if (msg.contains('ITEM CODE')) { pontoItem += 4; }
+    if (msg.contains('ITEM') && msg.contains('UNKNOWN')) { pontoItem += 4; }
+    if (itemEncontrado.isNotEmpty) { pontoItem += 3; }
 
-    if (msg.contains('-5002')) pontoDeposito += 10;
-    if (msg.contains('WAREHOUSE NOT FOUND')) pontoDeposito += 8;
-    if (msg.contains('INVALID WAREHOUSE')) pontoDeposito += 8;
-    if (msg.contains('WAREHOUSE') && msg.contains('NOT FOUND'))
-      pontoDeposito += 6;
-    if (msg.contains('WAREHOUSE') && msg.contains('INVALID'))
-      pontoDeposito += 5;
-    if (msg.contains('WAREHOUSECODE') && msg.contains('NOT FOUND'))
-      pontoDeposito += 6;
-    if (msg.contains('WAREHOUSE') && pontoDeposito == 0) pontoDeposito += 1;
+    if (msg.contains('-5002')) { pontoDeposito += 10; }
+    if (msg.contains('WAREHOUSE NOT FOUND')) { pontoDeposito += 8; }
+    if (msg.contains('INVALID WAREHOUSE')) { pontoDeposito += 8; }
+    if (msg.contains('WAREHOUSE') && msg.contains('NOT FOUND')) { pontoDeposito += 6; }
+    if (msg.contains('WAREHOUSE') && msg.contains('INVALID')) { pontoDeposito += 5; }
+    if (msg.contains('WAREHOUSECODE') && msg.contains('NOT FOUND')) { pontoDeposito += 6; }
+    if (msg.contains('WAREHOUSE') && pontoDeposito == 0) { pontoDeposito += 1; }
 
     if (pontoItem > pontoDeposito && pontoItem > 0) {
       return _ErroSap(
@@ -422,6 +461,9 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(
         child: Column(
           children: [
+            // ── Banner offline persistente ──
+            if (_semInternet) _buildOfflineBanner(),
+
             if (_carregando) const StoxLinearLoading(),
 
             StoxSummaryCard(
@@ -437,11 +479,8 @@ class _HomePageState extends State<HomePage> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 20, 16, 80),
                   children: [
-                    // ── Quick Actions ──
                     _buildQuickActions(),
                     const SizedBox(height: 24),
-
-                    // ── Lista de contagens ou estado vazio ──
                     if (_contagens.isEmpty)
                       _buildEmptyState()
                     else ...[
@@ -483,7 +522,42 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // ── Quick Actions Grid ────────────────────────────────────────────────────
+  // ── Banner offline ────────────────────────────────────────────────────────
+
+  Widget _buildOfflineBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: Colors.red.shade700,
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off_rounded, color: Colors.white, size: 18),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Sem conexão com a internet',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          Text(
+            'OFFLINE',
+            style: TextStyle(
+              color: Colors.white.withAlpha(180),
+              fontWeight: FontWeight.bold,
+              fontSize: 11,
+              letterSpacing: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Quick Actions ─────────────────────────────────────────────────────────
 
   Widget _buildQuickActions() {
     final theme = Theme.of(context);
@@ -506,51 +580,43 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.6,
+        Row(
           children: [
-            _buildActionCard(
-              icon: Icons.add_box_rounded,
-              label: 'Contagem',
-              sub: 'Modo offline',
-              cor: theme.primaryColor,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  StoxApp.transicaoPadrao(const ContadorOfflinePage()),
-                ).then((_) => _carregarContagens());
-              },
-            ),
-            _buildActionCard(
-              icon: Icons.search_rounded,
-              label: 'Pesquisar Item',
-              sub: 'Consulta SAP',
-              cor: Colors.teal.shade600,
-              onTap: () => Navigator.push(
-                context,
-                StoxApp.transicaoPadrao(const ItemSearchPage()),
+            Expanded(
+              child: _buildActionCard(
+                icon: Icons.add_box_rounded,
+                label: 'Contagem',
+                sub: 'Modo offline',
+                cor: theme.primaryColor,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    StoxApp.transicaoPadrao(const ContadorOfflinePage()),
+                  ).then((_) => _carregarContagens());
+                },
               ),
             ),
-            _buildActionCard(
-              icon: Icons.share_rounded,
-              label: 'Exportar CSV',
-              sub: '${_contagens.length} registros',
-              cor: Colors.orange.shade700,
-              onTap: _exportarRelatorio,
+            const SizedBox(width: 10),
+            Expanded(
+              child: _buildActionCard(
+                icon: Icons.search_rounded,
+                label: 'Pesquisar',
+                sub: 'Consulta SAP',
+                cor: Colors.teal.shade600,
+                onTap: () => Navigator.push(
+                  context,
+                  StoxApp.transicaoPadrao(const ItemSearchPage()),
+                ),
+              ),
             ),
-            _buildActionCard(
-              icon: Icons.settings_rounded,
-              label: 'Configurações',
-              sub: 'API e depósito',
-              cor: Colors.grey.shade600,
-              onTap: () => Navigator.push(
-                context,
-                StoxApp.transicaoPadrao(const ApiConfigPage()),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _buildActionCard(
+                icon: Icons.share_rounded,
+                label: 'Exportar',
+                sub: '${_contagens.length} reg.',
+                cor: Colors.orange.shade700,
+                onTap: _exportarRelatorio,
               ),
             ),
           ],
@@ -575,7 +641,8 @@ class _HomePageState extends State<HomePage> {
         },
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
+          height: 100,
           decoration: BoxDecoration(
             color: cor.withAlpha(15),
             borderRadius: BorderRadius.circular(14),
@@ -583,22 +650,21 @@ class _HomePageState extends State<HomePage> {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, color: cor, size: 28),
+              Icon(icon, color: cor, size: 26),
               const Spacer(),
               Text(
                 label,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  fontSize: 14,
+                  fontSize: 13,
                   color: Colors.grey.shade900,
                 ),
               ),
               const SizedBox(height: 2),
               Text(
                 sub,
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
               ),
             ],
           ),
@@ -610,6 +676,33 @@ class _HomePageState extends State<HomePage> {
   // ── Chip de conexão SAP ───────────────────────────────────────────────────
 
   Widget _buildChipConexao() {
+    // Sem internet = sempre vermelho
+    if (_semInternet) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.red.shade200),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.wifi_off_rounded, size: 14, color: Colors.red.shade700),
+            const SizedBox(width: 4),
+            Text(
+              'Sem internet',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.red.shade700,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final conectado = _sapConectado;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -735,15 +828,25 @@ class _HomePageState extends State<HomePage> {
             accountEmail: Row(
               children: [
                 Icon(
-                  _sapConectado ? Icons.check_circle : Icons.cancel,
-                  color: _sapConectado ? Colors.greenAccent : Colors.redAccent,
+                  _semInternet
+                      ? Icons.wifi_off_rounded
+                      : _sapConectado
+                          ? Icons.check_circle
+                          : Icons.cancel,
+                  color: _semInternet
+                      ? Colors.redAccent
+                      : _sapConectado
+                          ? Colors.greenAccent
+                          : Colors.redAccent,
                   size: 14,
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  _sapConectado
-                      ? 'SAP Business One Conectado'
-                      : 'SAP Desconectado',
+                  _semInternet
+                      ? 'Sem internet'
+                      : _sapConectado
+                          ? 'SAP Business One Conectado'
+                          : 'SAP Desconectado',
                 ),
               ],
             ),

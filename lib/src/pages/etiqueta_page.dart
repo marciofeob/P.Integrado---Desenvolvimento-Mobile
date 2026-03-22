@@ -4,15 +4,16 @@ import 'package:flutter/services.dart';
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 import '../models/label_config.dart';
 import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
 
-/// Tela de preview e impressão de etiquetas térmicas via Bluetooth.
-///
-/// Suporta impressão de item único ou lote (via [itenslote]).
-/// A configuração do layout é persistida em [LabelConfig].
+enum _ModoImpressao { bluetooth, rede }
+
 class EtiquetaPage extends StatefulWidget {
   final Map<String, dynamic>        itemData;
   final String                      deposito;
@@ -38,13 +39,13 @@ class _EtiquetaPageState extends State<EtiquetaPage>
   bool _isPrinting   = false;
   int  _printedCount = 0;
 
-  LabelConfig    _config        = LabelConfig();
+  LabelConfig      _config = LabelConfig();
+  _ModoImpressao   _modo   = _ModoImpressao.rede;
   late TabController _tabController;
 
-  late TextEditingController _cab1Controller;
-  late TextEditingController _cab2Controller;
-  late TextEditingController _rodapeController;
   late TextEditingController _copiasController;
+  late TextEditingController _larguraController;
+  late TextEditingController _alturaController;
 
   bool get _isLote =>
       widget.itenslote != null && widget.itenslote!.isNotEmpty;
@@ -57,16 +58,14 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _carregarConfig();
-    _solicitarPermissoes();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _cab1Controller.dispose();
-    _cab2Controller.dispose();
-    _rodapeController.dispose();
     _copiasController.dispose();
+    _larguraController.dispose();
+    _alturaController.dispose();
     super.dispose();
   }
 
@@ -76,13 +75,12 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     final config = await LabelConfig.carregar();
     if (!mounted) return;
     setState(() => _config = config);
-    _cab1Controller   = TextEditingController(text: config.cabecalhoLinha1);
-    _cab2Controller   = TextEditingController(text: config.cabecalhoLinha2);
-    _rodapeController = TextEditingController(text: config.rodapeTexto);
-    _copiasController = TextEditingController(text: config.copiasPorItem.toString());
+    _copiasController  = TextEditingController(text: config.copiasPorItem.toString());
+    _larguraController = TextEditingController(text: config.larguraMm.toString());
+    _alturaController  = TextEditingController(text: config.alturaMm.toString());
   }
 
-  Future<void> _solicitarPermissoes() async {
+  Future<void> _solicitarPermissoesBluetooth() async {
     final statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
@@ -104,11 +102,14 @@ class _EtiquetaPageState extends State<EtiquetaPage>
 
   Future<void> _salvarConfig() async {
     FocusScope.of(context).unfocus();
+
+    final largura = int.tryParse(_larguraController.text)?.clamp(20, 200) ?? 60;
+    final altura  = int.tryParse(_alturaController.text)?.clamp(15, 200)  ?? 40;
+
     final novaConfig = _config.copyWith(
-      cabecalhoLinha1: _cab1Controller.text.trim(),
-      cabecalhoLinha2: _cab2Controller.text.trim(),
-      rodapeTexto:     _rodapeController.text.trim(),
-      copiasPorItem:   int.tryParse(_copiasController.text)?.clamp(1, 99) ?? 1,
+      larguraMm:     largura,
+      alturaMm:      altura,
+      copiasPorItem: int.tryParse(_copiasController.text)?.clamp(1, 99) ?? 1,
     );
     await novaConfig.salvar();
     await StoxAudio.play('sounds/check.mp3');
@@ -118,13 +119,128 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     _tabController.animateTo(0);
   }
 
+  // ── Geração de PDF ────────────────────────────────────────────────────────
+
+  pw.Page _gerarPaginaPdf(Map<String, dynamic> item) {
+    final codigo = item['ItemCode']?.toString()  ?? '000';
+    final nome   = item['ItemName']?.toString()  ?? '';
+    final dep    = item['_deposito']?.toString() ?? widget.deposito;
+
+    final larguraPt = _config.larguraMm * PdfPageFormat.mm;
+    final alturaPt  = _config.alturaMm  * PdfPageFormat.mm;
+
+    return pw.Page(
+      pageFormat: PdfPageFormat(
+        larguraPt,
+        alturaPt,
+        marginAll: 2 * PdfPageFormat.mm,
+      ),
+      build: (ctx) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        children: [
+          if (_config.mostrarNomeItem && nome.isNotEmpty) ...[
+            pw.Text(
+              nome,
+              style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+              textAlign: pw.TextAlign.center,
+              maxLines: 2,
+            ),
+            pw.SizedBox(height: 1),
+          ],
+
+          if (_config.mostrarCodigoBarras)
+            pw.Expanded(
+              child: pw.BarcodeWidget(
+                barcode: Barcode.code128(),
+                data:    codigo.isEmpty ? '000' : codigo,
+                drawText: false,
+              ),
+            ),
+
+          pw.SizedBox(height: 1),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            children: [
+              if (_config.mostrarCodigoTexto)
+                pw.Text(
+                  codigo,
+                  style: pw.TextStyle(
+                    fontSize: 7,
+                    fontWeight: pw.FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              if (_config.mostrarCodigoTexto && _config.mostrarDeposito)
+                pw.Text('  •  ', style: const pw.TextStyle(fontSize: 6)),
+              if (_config.mostrarDeposito)
+                pw.Text('DEP: $dep',
+                    style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Impressão ─────────────────────────────────────────────────────────────
 
   Future<void> _imprimir() async {
+    if (_modo == _ModoImpressao.bluetooth) {
+      await _imprimirBluetooth();
+    } else {
+      await _imprimirSistema();
+    }
+  }
+
+  Future<void> _imprimirSistema() async {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _isPrinting   = true;
+      _printedCount = 0;
+    });
+
+    try {
+      final doc = pw.Document();
+
+      for (final item in _itensParaImprimir) {
+        for (int i = 0; i < _config.copiasPorItem; i++) {
+          doc.addPage(_gerarPaginaPdf(item));
+        }
+        if (mounted) setState(() => _printedCount++);
+      }
+
+      final larguraPt = _config.larguraMm * PdfPageFormat.mm;
+      final alturaPt  = _config.alturaMm  * PdfPageFormat.mm;
+
+      await Printing.layoutPdf(
+        onLayout: (_) => doc.save(),
+        name: 'Etiqueta_STOX',
+        format: PdfPageFormat(larguraPt, alturaPt),
+      );
+
+      await StoxAudio.play('sounds/check.mp3');
+      if (!mounted) return;
+      final total = _itensParaImprimir.length * _config.copiasPorItem;
+      StoxSnackbar.sucesso(
+        context,
+        _isLote
+            ? '$total etiqueta${total != 1 ? 's' : ''} enviada${total != 1 ? 's' : ''}!'
+            : 'Etiqueta enviada para impressão!',
+      );
+    } catch (e) {
+      await StoxAudio.play('sounds/fail.mp3', isFail: true);
+      if (!mounted) return;
+      StoxSnackbar.erro(context, 'Erro ao imprimir: $e');
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
+    }
+  }
+
+  Future<void> _imprimirBluetooth() async {
     if (_selectedDevice == null) {
       await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
-      StoxSnackbar.aviso(context, 'Selecione uma impressora primeiro.');
+      StoxSnackbar.aviso(context, 'Selecione uma impressora Bluetooth.');
       return;
     }
 
@@ -136,11 +252,11 @@ class _EtiquetaPageState extends State<EtiquetaPage>
 
     try {
       final conectado = await _bluetooth.isConnected ?? false;
-      if (!conectado) await _bluetooth.connect(_selectedDevice!);
+      if (!conectado) { await _bluetooth.connect(_selectedDevice!); }
 
       for (final item in _itensParaImprimir) {
         for (int i = 0; i < _config.copiasPorItem; i++) {
-          await _imprimirItem(item);
+          await _imprimirItemBluetooth(item);
           await StoxAudio.play('sounds/beep.mp3');
         }
         if (mounted) setState(() => _printedCount++);
@@ -166,43 +282,43 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     }
   }
 
-  /// Envia os comandos ESC/POS de um item para a impressora Bluetooth.
-  Future<void> _imprimirItem(Map<String, dynamic> item) async {
+  Future<void> _imprimirItemBluetooth(Map<String, dynamic> item) async {
     final codigo = item['ItemCode']?.toString()  ?? '000';
     final nome   = item['ItemName']?.toString()  ?? '';
     final dep    = item['_deposito']?.toString() ?? widget.deposito;
 
-    _bluetooth.printNewLine();
-    if (_config.mostrarCabecalho && _config.cabecalhoLinha1.isNotEmpty) {
-      _bluetooth.printCustom(_config.cabecalhoLinha1, 2, 1);
-    }
-    if (_config.mostrarCabecalho && _config.cabecalhoLinha2.isNotEmpty) {
-      _bluetooth.printCustom(_config.cabecalhoLinha2, 1, 1);
-    }
-    _bluetooth.printCustom('--------------------------------', 0, 1);
+    // ── Nome do item ──
     if (_config.mostrarNomeItem && nome.isNotEmpty) {
-      _bluetooth.printCustom(nome, 1, 1);
-    }
-    _bluetooth.printNewLine();
-    if (_config.mostrarCodigoBarras) {
-      _bluetooth.printQRcode(codigo, 150, 150, 1);
-    }
-    if (_config.mostrarCodigoTexto) {
-      _bluetooth.printCustom(codigo, 1, 1);
-    }
-    _bluetooth.printNewLine();
-
-    if (_config.mostrarDeposito) {
-      _bluetooth.printCustom('DEP: $dep', 0, 1);
+      _bluetooth.printCustom(nome, 0, 1);
     }
 
-    if (_config.mostrarRodape && _config.rodapeTexto.isNotEmpty) {
-      _bluetooth.printCustom(_config.rodapeTexto, 0, 1);
+    // ── Código de barras Code128 ──
+    if (_config.mostrarCodigoBarras && codigo.isNotEmpty) {
+      // Altura dinâmica: 8 dots/mm (203 DPI) - desconta ~9mm pras linhas de texto
+      final barcodeHeight = ((_config.alturaMm - 9) * 8).clamp(40, 255);
+      _bluetooth.writeBytes(Uint8List.fromList([0x1B, 0x61, 0x01]));
+      _bluetooth.writeBytes(Uint8List.fromList([0x1D, 0x68, barcodeHeight]));
+      _bluetooth.writeBytes(Uint8List.fromList([0x1D, 0x77, 3]));
+      _bluetooth.writeBytes(Uint8List.fromList([0x1D, 0x48, 0]));
+      final codeData = '{B$codigo';
+      _bluetooth.writeBytes(Uint8List.fromList([
+        0x1D, 0x6B, 73, codeData.length,
+        ...codeData.codeUnits,
+      ]));
     }
-    _bluetooth.printNewLine();
+
+    // ── Código + Depósito na mesma linha ──
+    final infoLine = <String>[
+      if (_config.mostrarCodigoTexto) codigo,
+      if (_config.mostrarDeposito) 'DEP: $dep',
+    ].join('  ');
+    if (infoLine.isNotEmpty) {
+      _bluetooth.printCustom(infoLine, 0, 1);
+    }
+
     _bluetooth.printNewLine();
 
-    if (_isLote) await Future.delayed(const Duration(milliseconds: 200));
+    if (_isLote) { await Future.delayed(const Duration(milliseconds: 300)); }
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -226,7 +342,9 @@ class _EtiquetaPageState extends State<EtiquetaPage>
         ),
       ),
       body: Column(children: [
-        _buildSeletorImpressora(),
+        _buildSeletorModo(),
+        if (_modo == _ModoImpressao.bluetooth)
+          _buildSeletorImpressoraBluetooth(),
         Expanded(
           child: TabBarView(
             controller: _tabController,
@@ -238,15 +356,96 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     );
   }
 
-  // ── Subwidgets ────────────────────────────────────────────────────────────
+  // ── Seletor de modo ───────────────────────────────────────────────────────
 
-  Widget _buildSeletorImpressora() {
+  Widget _buildSeletorModo() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(color: Colors.black.withAlpha(15), blurRadius: 4, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Row(children: [
+        Expanded(
+          child: _buildModoChip(
+            icon:  Icons.wifi_rounded,
+            label: 'Rede / WiFi',
+            ativo: _modo == _ModoImpressao.rede,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              setState(() => _modo = _ModoImpressao.rede);
+            },
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _buildModoChip(
+            icon:  Icons.bluetooth_rounded,
+            label: 'Bluetooth',
+            ativo: _modo == _ModoImpressao.bluetooth,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              setState(() => _modo = _ModoImpressao.bluetooth);
+              _solicitarPermissoesBluetooth();
+            },
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildModoChip({
+    required IconData icon,
+    required String label,
+    required bool ativo,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: ativo ? theme.primaryColor.withAlpha(20) : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: ativo ? theme.primaryColor : Colors.grey.shade300,
+              width: ativo ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18,
+                  color: ativo ? theme.primaryColor : Colors.grey.shade500),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: ativo ? FontWeight.bold : FontWeight.w500,
+                  color: ativo ? theme.primaryColor : Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSeletorImpressoraBluetooth() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: const BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))
+          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
         ],
       ),
       child: Row(children: [
@@ -283,6 +482,8 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       ]),
     );
   }
+
+  // ── Preview ───────────────────────────────────────────────────────────────
 
   Widget _buildPreviewTab() {
     if (_isLote) return _buildPreviewLote();
@@ -359,71 +560,56 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     ]);
   }
 
+  // ── Configuração ──────────────────────────────────────────────────────────
+
   Widget _buildConfigTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _sectionTitle('Cabeçalho da Etiqueta'),
-          SwitchListTile.adaptive(
-            title: const Text('Mostrar cabeçalho'),
-            value: _config.mostrarCabecalho,
-            onChanged: (v) {
-              HapticFeedback.selectionClick();
-              setState(() => _config = _config.copyWith(mostrarCabecalho: v));
-            },
-            contentPadding: EdgeInsets.zero,
+          _sectionTitle('Tamanho da Etiqueta'),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: StoxTextField(
+                  controller: _larguraController,
+                  labelText: 'Largura (mm)',
+                  prefixIcon: Icons.swap_horiz_rounded,
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StoxTextField(
+                  controller: _alturaController,
+                  labelText: 'Altura (mm)',
+                  prefixIcon: Icons.swap_vert_rounded,
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+            ],
           ),
-          if (_config.mostrarCabecalho) ...[
-            const SizedBox(height: 8),
-            StoxTextField(
-              controller: _cab1Controller,
-              labelText: 'Linha 1 (ex: GRUPO JCN)',
-              prefixIcon: Icons.title_rounded,
-              textCapitalization: TextCapitalization.characters,
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'Atual: ${_config.larguraMm} × ${_config.alturaMm} mm',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
             ),
-            const SizedBox(height: 12),
-            StoxTextField(
-              controller: _cab2Controller,
-              labelText: 'Linha 2 (opcional)',
-              prefixIcon: Icons.subtitles_rounded,
-              textCapitalization: TextCapitalization.words,
-            ),
-          ],
-          const SizedBox(height: 20),
+          ),
+          const SizedBox(height: 16),
           const Divider(),
 
-          _sectionTitle('Campos do Item'),
+          _sectionTitle('Campos da Etiqueta'),
           _switchItem('Nome do item', _config.mostrarNomeItem,
               (v) => setState(() => _config = _config.copyWith(mostrarNomeItem: v))),
-          _switchItem('Código de barras (QR)', _config.mostrarCodigoBarras,
+          _switchItem('Código de barras', _config.mostrarCodigoBarras,
               (v) => setState(() => _config = _config.copyWith(mostrarCodigoBarras: v))),
           _switchItem('Código em texto', _config.mostrarCodigoTexto,
               (v) => setState(() => _config = _config.copyWith(mostrarCodigoTexto: v))),
           _switchItem('Depósito', _config.mostrarDeposito,
               (v) => setState(() => _config = _config.copyWith(mostrarDeposito: v))),
-          const SizedBox(height: 8),
-          const Divider(),
-
-          _sectionTitle('Rodapé'),
-          SwitchListTile.adaptive(
-            title: const Text('Mostrar rodapé'),
-            value: _config.mostrarRodape,
-            onChanged: (v) {
-              HapticFeedback.selectionClick();
-              setState(() => _config = _config.copyWith(mostrarRodape: v));
-            },
-            contentPadding: EdgeInsets.zero,
-          ),
-          if (_config.mostrarRodape) ...[
-            const SizedBox(height: 8),
-            StoxTextField(
-              controller: _rodapeController,
-              labelText: 'Texto do rodapé (ex: VER. 1.0)',
-              prefixIcon: Icons.text_snippet_rounded,
-            ),
-          ],
           const SizedBox(height: 16),
           const Divider(),
 
@@ -474,102 +660,101 @@ class _EtiquetaPageState extends State<EtiquetaPage>
         dense: true,
       );
 
-  /// Preview estático da etiqueta no tamanho 260×160 px.
+  /// Preview proporcional da etiqueta.
   Widget _buildVisualEtiqueta(Map<String, dynamic> item) {
     final codigo = item['ItemCode']?.toString() ?? '000';
     final nome   = item['ItemName']?.toString() ?? '';
     final dep    = item['_deposito']?.toString() ?? widget.deposito;
 
-    const previewWidth  = 260.0;
-    const previewHeight = 160.0;
+    const escala     = 4.0;
+    const maxLargura = 280.0;
+    final larguraRaw = _config.larguraMm * escala;
+    final fator      = larguraRaw > maxLargura ? maxLargura / larguraRaw : 1.0;
+    final previewW   = larguraRaw * fator;
+    final previewH   = _config.alturaMm * escala * fator;
 
-    return Container(
-      width: previewWidth,
-      height: previewHeight,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.grey.shade300),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 12, offset: Offset(0, 6))
-        ],
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          if (_config.mostrarCabecalho && _config.cabecalhoLinha1.isNotEmpty) ...[
-            Text(_config.cabecalhoLinha1,
-                style: const TextStyle(
-                    fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-            if (_config.cabecalhoLinha2.isNotEmpty)
-              Text(_config.cabecalhoLinha2,
-                  style: TextStyle(fontSize: 8, color: Colors.grey.shade600)),
-            const Divider(height: 8),
-          ],
-          if (_config.mostrarNomeItem && nome.isNotEmpty) ...[
-            Text(nome,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 6),
-          ],
-          if (_config.mostrarCodigoBarras) ...[
-            Flexible(
-              child: BarcodeWidget(
-                barcode:  Barcode.code128(),
-                data:     codigo.isEmpty ? '000' : codigo,
-                width:    previewWidth - 40,
-                height:   38,
-                drawText: false,
-              ),
-            ),
-            const SizedBox(height: 4),
-          ],
-          if (_config.mostrarCodigoTexto)
-            Text(codigo,
-                style: const TextStyle(
-                    letterSpacing: 1.5,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12)),
-          if (_config.mostrarDeposito || _config.mostrarRodape) ...[
-            const SizedBox(height: 6),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                if (_config.mostrarDeposito)
-                  Text('DEP: $dep',
-                      style: const TextStyle(
-                          fontSize: 9, fontWeight: FontWeight.bold)),
-                if (_config.mostrarRodape && _config.rodapeTexto.isNotEmpty)
-                  Text(_config.rodapeTexto,
-                      style: TextStyle(fontSize: 8, color: Colors.grey.shade500)),
+    return Column(
+      children: [
+        Container(
+          width: previewW,
+          height: previewH,
+          padding: EdgeInsets.all(6 * fator),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: Colors.grey.shade300),
+            boxShadow: const [
+              BoxShadow(color: Colors.black12, blurRadius: 12, offset: Offset(0, 6)),
+            ],
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (_config.mostrarNomeItem && nome.isNotEmpty) ...[
+                Text(nome,
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 9 * fator),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+                SizedBox(height: 2 * fator),
               ],
-            ),
-          ],
-        ],
-      ),
+              if (_config.mostrarCodigoBarras)
+                Expanded(
+                  child: BarcodeWidget(
+                    barcode:  Barcode.code128(),
+                    data:     codigo.isEmpty ? '000' : codigo,
+                    width:    previewW - 12 * fator,
+                    drawText: false,
+                  ),
+                ),
+              SizedBox(height: 2 * fator),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_config.mostrarCodigoTexto)
+                    Text(codigo,
+                        style: TextStyle(
+                            letterSpacing: 1,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 9 * fator)),
+                  if (_config.mostrarCodigoTexto && _config.mostrarDeposito)
+                    Text('  •  ', style: TextStyle(fontSize: 7 * fator, color: Colors.grey.shade400)),
+                  if (_config.mostrarDeposito)
+                    Text('DEP: $dep',
+                        style: TextStyle(
+                            fontSize: 8 * fator, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '${_config.larguraMm} × ${_config.alturaMm} mm',
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+        ),
+      ],
     );
   }
 
   Widget _buildBotaoImprimir() {
     final total = _itensParaImprimir.length * _config.copiasPorItem;
+    final modoLabel = _modo == _ModoImpressao.rede ? 'IMPRIMIR' : 'IMPRIMIR VIA BT';
+
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
       decoration: const BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2))
+          BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2)),
         ],
       ),
       child: StoxButton(
         label: _isPrinting
             ? 'Imprimindo $_printedCount de ${_itensParaImprimir.length}...'
             : _isLote
-                ? 'IMPRIMIR $total ETIQUETA${total != 1 ? 'S' : ''}'
-                : 'IMPRIMIR ETIQUETA',
+                ? '$modoLabel $total ETIQUETA${total != 1 ? 'S' : ''}'
+                : '$modoLabel ETIQUETA',
         icon:    _isPrinting ? null : Icons.print_rounded,
         loading: _isPrinting,
         onPressed: _imprimir,

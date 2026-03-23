@@ -938,7 +938,10 @@ class _HomePageState extends State<HomePage> {
             },
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            padding: EdgeInsets.fromLTRB(
+              16, 8, 16,
+              24 + MediaQuery.of(context).viewPadding.bottom,
+            ),
             child: Text(
               'STOX v1.0.0',
               textAlign: TextAlign.center,

@@ -742,7 +742,10 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     final modoLabel = _modo == _ModoImpressao.rede ? 'IMPRIMIR' : 'IMPRIMIR VIA BT';
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+      padding: EdgeInsets.fromLTRB(
+        20, 12, 20,
+        20 + MediaQuery.of(context).viewPadding.bottom,
+      ),  
       decoration: const BoxDecoration(
         color: Colors.white,
         boxShadow: [

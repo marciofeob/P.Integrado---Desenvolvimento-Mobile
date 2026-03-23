@@ -296,7 +296,10 @@ class _ItemSearchPageState extends State<ItemSearchPage> {
                   ]),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  padding: EdgeInsets.fromLTRB(
+                    16, 24, 16,
+                    24 + MediaQuery.of(context).viewPadding.bottom,
+                  ),
                   child: Text(
                     'Alinhe o código de barras dentro do quadro',
                     style: TextStyle(color: Colors.grey.shade600),
@@ -876,7 +879,10 @@ class _CarrinhoSheetState extends State<_CarrinhoSheet> {
         ),
         if (_keys.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            padding: EdgeInsets.fromLTRB(
+              20, 8, 20,
+              24 + MediaQuery.of(context).viewPadding.bottom,
+            ),
             child: StoxButton(
               label: 'Imprimir ${_keys.length} '
                   '${_keys.length == 1 ? "etiqueta" : "etiquetas"}',

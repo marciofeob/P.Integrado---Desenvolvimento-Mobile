@@ -74,6 +74,8 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
+    // Captura a altura da barra de navegação do sistema (botões do Android)
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       appBar: AppBar(
@@ -176,21 +178,12 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
                         onPressed: () => Navigator.pop(context),
                       ),
 
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24), // Espaço antes da logo
 
-                      Image.asset(
-                        'assets/images/sap-logo.png',
-                        height: 20,
-                      ),
+                      // Logo FEOB (SAP removida daqui)
+                      Image.asset('assets/images/unifeob.png', height: 35),
 
-                      const SizedBox(height: 16),
-
-                      Image.asset(
-                        'assets/images/unifeob.png',
-                        height: 30,
-                      ),
-
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
 
                       Text(
                         'STOX v1.0.0\nDesenvolvido pelos alunos do curso de Análise e Desenvolvimento de Sistemas 2026.',
@@ -201,7 +194,8 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
                         ),
                       ),
 
-                      const SizedBox(height: 24),
+                      // Espaço adaptativo final para não cortar o texto
+                      SizedBox(height: bottomPadding > 0 ? bottomPadding + 16 : 24),
                     ],
                   ),
                 ),

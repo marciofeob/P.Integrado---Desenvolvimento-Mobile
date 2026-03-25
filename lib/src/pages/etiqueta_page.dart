@@ -1,3 +1,4 @@
+import 'dart:convert'; // Para utf8
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -38,6 +39,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
   BluetoothDevice?      _selectedDevice;
   bool _isPrinting   = false;
   int  _printedCount = 0;
+  bool _isConnected = false;
 
   LabelConfig      _config = LabelConfig();
   _ModoImpressao   _modo   = _ModoImpressao.rede;
@@ -58,15 +60,39 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _carregarConfig();
+    _initBluetooth();
   }
 
   @override
   void dispose() {
+    _disconnectBluetooth();
     _tabController.dispose();
     _copiasController.dispose();
     _larguraController.dispose();
     _alturaController.dispose();
     super.dispose();
+  }
+
+  Future<void> _initBluetooth() async {
+    try {
+      final isConnected = await _bluetooth.isConnected ?? false;
+      if (mounted && isConnected) {
+        setState(() => _isConnected = true);
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('Erro ao verificar conexão Bluetooth: $e');
+    }
+  }
+
+  Future<void> _disconnectBluetooth() async {
+    if (_isConnected) {
+      try {
+        await _bluetooth.disconnect();
+      } catch (e) {
+        if (kDebugMode) debugPrint('Erro ao desconectar Bluetooth: $e');
+      }
+    }
+    _isConnected = false;
   }
 
   // ── Configuração ──────────────────────────────────────────────────────────
@@ -84,10 +110,17 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     final statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
+      Permission.bluetooth,
       Permission.location,
     ].request();
-    if (statuses[Permission.bluetoothConnect]!.isGranted) {
+
+    if (statuses[Permission.bluetoothConnect]!.isGranted ||
+        statuses[Permission.bluetooth]!.isGranted) {
       _buscarDispositivosBluetooth();
+    } else {
+      if (mounted) {
+        StoxSnackbar.aviso(context, 'Permissão Bluetooth necessária');
+      }
     }
   }
 
@@ -97,6 +130,45 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       if (mounted) setState(() => _devices = devices);
     } catch (e) {
       if (kDebugMode) debugPrint('EtiquetaPage._buscarDispositivosBluetooth: $e');
+      if (mounted) {
+        StoxSnackbar.erro(context, 'Erro ao buscar dispositivos Bluetooth');
+      }
+    }
+  }
+
+  // Retorna bool indicando sucesso da conexão
+  Future<bool> _conectarBluetooth() async {
+    if (_selectedDevice == null) {
+      StoxSnackbar.aviso(context, 'Selecione uma impressora');
+      return false;
+    }
+
+    try {
+      setState(() => _isPrinting = true);
+
+      // Desconecta se já estiver conectado
+      if (_isConnected) {
+        await _bluetooth.disconnect();
+        _isConnected = false;
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      // Conecta
+      final connected = await _bluetooth.connect(_selectedDevice!);
+      if (connected != null && connected) {
+        _isConnected = true;
+        await Future.delayed(const Duration(milliseconds: 500));
+        return true;
+      } else {
+        throw Exception('Falha na conexão');
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('Erro ao conectar Bluetooth: $e');
+      if (mounted) {
+        StoxSnackbar.erro(context, 'Não foi possível conectar na impressora');
+      }
+      setState(() => _isPrinting = false);
+      return false;
     }
   }
 
@@ -119,6 +191,82 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     _tabController.animateTo(0);
   }
 
+  // ── Comandos TSPL (corrigidos) ────────────────────────────────────────────
+
+  /// Envia um comando TSPL com quebra de linha CR+LF
+  Future<void> _enviarComandoTSPL(String comando) async {
+    final bytes = utf8.encode('$comando\r\n');
+    await _bluetooth.writeBytes(Uint8List.fromList(bytes));
+    if (kDebugMode) debugPrint('TSPL >> $comando');
+    await Future.delayed(const Duration(milliseconds: 50));
+  }
+
+  /// Inicializa a impressora com as dimensões e configurações básicas
+  Future<void> _inicializarImpressora() async {
+    final larguraPontos = (_config.larguraMm * 8).toInt();
+    final alturaPontos  = (_config.alturaMm * 8).toInt();
+
+    await _enviarComandoTSPL('SIZE $larguraPontos, $alturaPontos');
+    await _enviarComandoTSPL('GAP 0, 0');
+    await _enviarComandoTSPL('DIRECTION 1');
+    await _enviarComandoTSPL('REFERENCE 0,0');
+    await _enviarComandoTSPL('SPEED 4');
+    await _enviarComandoTSPL('DENSITY 12');
+  }
+
+  /// Imprime uma etiqueta (já com a impressora configurada)
+  Future<void> _imprimirEtiquetaTSPL(Map<String, dynamic> item) async {
+    final codigo = item['ItemCode']?.toString() ?? '000';
+    final nome   = item['ItemName']?.toString() ?? '';
+    final dep    = item['_deposito']?.toString() ?? widget.deposito;
+
+    final alturaPontos = (_config.alturaMm * 8).toInt();
+
+    // Limpa o buffer atual
+    await _enviarComandoTSPL('CLS');
+
+    int yPos = 20;
+
+    // Nome do item
+    if (_config.mostrarNomeItem && nome.isNotEmpty) {
+      await _enviarComandoTSPL('TEXT 20,$yPos,"0",1,1,1,"${_escapeTSPL(nome)}"');
+      yPos += 30;
+    }
+
+    // Código de barras Code128
+    if (_config.mostrarCodigoBarras && codigo.isNotEmpty) {
+      final alturaBarra = (alturaPontos - yPos - 60).clamp(40, 200);
+      await _enviarComandoTSPL(
+          'BARCODE 20,$yPos,"128",$alturaBarra,1,0,2,2,"${_escapeTSPL(codigo)}"');
+      yPos += alturaBarra + 10;
+    }
+
+    // Linha de informações (código + depósito)
+    final infoLine = <String>[];
+    if (_config.mostrarCodigoTexto) infoLine.add(codigo);
+    if (_config.mostrarDeposito) infoLine.add('DEP: $dep');
+    final infoText = infoLine.join('  ');
+
+    if (infoText.isNotEmpty) {
+      final larguraPontos = (_config.larguraMm * 8).toInt();
+      final xPos = (larguraPontos - _calcularLarguraTexto(infoText, 1)) ~/ 2;
+      await _enviarComandoTSPL(
+          'TEXT ${xPos > 0 ? xPos : 20},$yPos,"0",1,1,1,"${_escapeTSPL(infoText)}"');
+    }
+
+    // Comando de impressão (1 cópia)
+    await _enviarComandoTSPL('PRINT 1,1');
+  }
+
+  String _escapeTSPL(String text) {
+    return text.replaceAll('"', '\\"').replaceAll('\n', ' ');
+  }
+
+  int _calcularLarguraTexto(String text, int fontSize) {
+    // Aproximação: cada caractere ocupa ~8 pontos no tamanho 1
+    return text.length * (fontSize * 8);
+  }
+
   // ── Geração de PDF ────────────────────────────────────────────────────────
 
   pw.Page _gerarPaginaPdf(Map<String, dynamic> item) {
@@ -137,17 +285,17 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       ),
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.center,
+        mainAxisAlignment: pw.MainAxisAlignment.center,
         children: [
           if (_config.mostrarNomeItem && nome.isNotEmpty) ...[
             pw.Text(
               nome,
-              style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+              style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
               textAlign: pw.TextAlign.center,
               maxLines: 2,
             ),
-            pw.SizedBox(height: 1),
+            pw.SizedBox(height: 2),
           ],
-
           if (_config.mostrarCodigoBarras)
             pw.Expanded(
               child: pw.BarcodeWidget(
@@ -156,8 +304,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
                 drawText: false,
               ),
             ),
-
-          pw.SizedBox(height: 1),
+          pw.SizedBox(height: 2),
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.center,
             children: [
@@ -251,18 +398,39 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     });
 
     try {
-      final conectado = await _bluetooth.isConnected ?? false;
-      if (!conectado) { await _bluetooth.connect(_selectedDevice!); }
+      // Conecta
+      final conectado = await _conectarBluetooth();
+      if (!conectado) throw Exception('Falha na conexão');
 
+      // Aguarda estabilização
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      // Inicializa a impressora (apenas uma vez)
+      await _inicializarImpressora();
+
+      // --- TESTE: comando simples (descomente para verificar se a impressora responde) ---
+      // await _enviarComandoTSPL('CLS');
+      // await _enviarComandoTSPL('TEXT 20,20,"0",1,1,1,"TESTE"');
+      // await _enviarComandoTSPL('PRINT 1,1');
+      // await Future.delayed(const Duration(seconds: 2));
+      // ---------------------------------------------------------------------------------
+
+      // Impressão real
       for (final item in _itensParaImprimir) {
         for (int i = 0; i < _config.copiasPorItem; i++) {
-          await _imprimirItemBluetooth(item);
+          await _imprimirEtiquetaTSPL(item);
           await StoxAudio.play('sounds/beep.mp3');
+          await Future.delayed(const Duration(milliseconds: 300));
         }
         if (mounted) setState(() => _printedCount++);
       }
 
+      // Aguarda fim da impressão (aumentei para 2 segundos)
+      await Future.delayed(const Duration(seconds: 2));
+
+      // Desconecta
       await _bluetooth.disconnect();
+      _isConnected = false;
 
       await StoxAudio.play('sounds/check.mp3');
       if (!mounted) return;
@@ -275,53 +443,16 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       );
     } catch (e) {
       await StoxAudio.play('sounds/fail.mp3', isFail: true);
+      if (kDebugMode) debugPrint('Erro impressão Bluetooth: $e');
       if (!mounted) return;
-      StoxSnackbar.erro(context, 'Erro de impressão: $e');
+      StoxSnackbar.erro(context, 'Erro de impressão: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _isPrinting = false);
+      await _disconnectBluetooth();
     }
   }
 
-  Future<void> _imprimirItemBluetooth(Map<String, dynamic> item) async {
-    final codigo = item['ItemCode']?.toString()  ?? '000';
-    final nome   = item['ItemName']?.toString()  ?? '';
-    final dep    = item['_deposito']?.toString() ?? widget.deposito;
-
-    // ── Nome do item ──
-    if (_config.mostrarNomeItem && nome.isNotEmpty) {
-      _bluetooth.printCustom(nome, 0, 1);
-    }
-
-    // ── Código de barras Code128 ──
-    if (_config.mostrarCodigoBarras && codigo.isNotEmpty) {
-      // Altura dinâmica: 8 dots/mm (203 DPI) - desconta ~9mm pras linhas de texto
-      final barcodeHeight = ((_config.alturaMm - 9) * 8).clamp(40, 255);
-      _bluetooth.writeBytes(Uint8List.fromList([0x1B, 0x61, 0x01]));
-      _bluetooth.writeBytes(Uint8List.fromList([0x1D, 0x68, barcodeHeight]));
-      _bluetooth.writeBytes(Uint8List.fromList([0x1D, 0x77, 3]));
-      _bluetooth.writeBytes(Uint8List.fromList([0x1D, 0x48, 0]));
-      final codeData = '{B$codigo';
-      _bluetooth.writeBytes(Uint8List.fromList([
-        0x1D, 0x6B, 73, codeData.length,
-        ...codeData.codeUnits,
-      ]));
-    }
-
-    // ── Código + Depósito na mesma linha ──
-    final infoLine = <String>[
-      if (_config.mostrarCodigoTexto) codigo,
-      if (_config.mostrarDeposito) 'DEP: $dep',
-    ].join('  ');
-    if (infoLine.isNotEmpty) {
-      _bluetooth.printCustom(infoLine, 0, 1);
-    }
-
-    _bluetooth.printNewLine();
-
-    if (_isLote) { await Future.delayed(const Duration(milliseconds: 300)); }
-  }
-
-  // ── Build ─────────────────────────────────────────────────────────────────
+  // ── Build (sem alterações, mantido igual) ─────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -356,8 +487,6 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     );
   }
 
-  // ── Seletor de modo ───────────────────────────────────────────────────────
-
   Widget _buildSeletorModo() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -376,6 +505,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
             onTap: () {
               HapticFeedback.selectionClick();
               setState(() => _modo = _ModoImpressao.rede);
+              _disconnectBluetooth();
             },
           ),
         ),
@@ -483,8 +613,6 @@ class _EtiquetaPageState extends State<EtiquetaPage>
     );
   }
 
-  // ── Preview ───────────────────────────────────────────────────────────────
-
   Widget _buildPreviewTab() {
     if (_isLote) return _buildPreviewLote();
     return SingleChildScrollView(
@@ -559,8 +687,6 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       ),
     ]);
   }
-
-  // ── Configuração ──────────────────────────────────────────────────────────
 
   Widget _buildConfigTab() {
     return SingleChildScrollView(
@@ -660,7 +786,6 @@ class _EtiquetaPageState extends State<EtiquetaPage>
         dense: true,
       );
 
-  /// Preview proporcional da etiqueta.
   Widget _buildVisualEtiqueta(Map<String, dynamic> item) {
     final codigo = item['ItemCode']?.toString() ?? '000';
     final nome   = item['ItemName']?.toString() ?? '';
@@ -689,6 +814,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (_config.mostrarNomeItem && nome.isNotEmpty) ...[
                 Text(nome,
@@ -745,7 +871,7 @@ class _EtiquetaPageState extends State<EtiquetaPage>
       padding: EdgeInsets.fromLTRB(
         20, 12, 20,
         20 + MediaQuery.of(context).viewPadding.bottom,
-      ),  
+      ),
       decoration: const BoxDecoration(
         color: Colors.white,
         boxShadow: [

@@ -94,6 +94,8 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
+    // Captura a altura da barra de navegação do sistema (botões do Android)
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       body: SafeArea(
@@ -182,17 +184,12 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24), // Espaço antes da logo
 
-                    // Logo SAP
-                    Image.asset('assets/images/sap-logo.png', height: 20),
+                    // Logo FEOB (SAP removida daqui)
+                    Image.asset('assets/images/unifeob.png', height: 35),
 
-                    const SizedBox(height: 16),
-
-                    // Logo FEOB
-                    Image.asset('assets/images/unifeob.png', height: 30),
-
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 12),
 
                     // Texto institucional
                     Text(
@@ -204,7 +201,8 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
 
-                    const SizedBox(height: 24),
+                    // Espaço adaptativo final para não cortar o texto
+                    SizedBox(height: bottomPadding > 0 ? bottomPadding + 16 : 24),
                   ],
                 ),
               ),

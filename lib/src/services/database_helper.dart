@@ -7,6 +7,10 @@ import 'package:path/path.dart';
 /// da tabela [contagens].
 ///
 /// syncStatus: 0 = Pendente, 1 = Sincronizado, 2 = Erro no envio.
+///
+/// countingMode: 'single' = Contador simples, 'multiple' = Contadores múltiplos.
+///
+/// counterID: ID do contador SAP (null = modo simples sem identificação).
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
@@ -31,7 +35,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), filePath);
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _criarTabelas,
       onUpgrade: _migrar,
     );
@@ -46,11 +50,16 @@ class DatabaseHelper {
         quantidade    REAL    NOT NULL,
         dataHora      TEXT    NOT NULL,
         syncStatus    INTEGER NOT NULL DEFAULT 0,
-        warehouseCode TEXT    NOT NULL DEFAULT '01'
+        warehouseCode TEXT    NOT NULL DEFAULT '01',
+        countingMode  TEXT    NOT NULL DEFAULT 'single',
+        counterID     INTEGER,
+        counterName   TEXT
       )
     ''');
-    await db.execute('CREATE INDEX idx_itemCode   ON contagens (itemCode)');
-    await db.execute('CREATE INDEX idx_syncStatus ON contagens (syncStatus)');
+    await db.execute('CREATE INDEX idx_itemCode     ON contagens (itemCode)');
+    await db.execute('CREATE INDEX idx_syncStatus   ON contagens (syncStatus)');
+    await db.execute('CREATE INDEX idx_counterID    ON contagens (counterID)');
+    await db.execute('CREATE INDEX idx_countingMode ON contagens (countingMode)');
   }
 
   /// Aplica migrations incrementais para usuários que já tinham o banco instalado.
@@ -60,16 +69,35 @@ class DatabaseHelper {
       await db.execute(
           "ALTER TABLE contagens ADD COLUMN warehouseCode TEXT NOT NULL DEFAULT '01'");
     }
-    // Para futuras versões: if (oldVersion < 3) { ... }
+    if (oldVersion < 3) {
+      // v2 → v3: suporte a contadores múltiplos
+      await db.execute(
+          "ALTER TABLE contagens ADD COLUMN countingMode TEXT NOT NULL DEFAULT 'single'");
+      await db.execute(
+          'ALTER TABLE contagens ADD COLUMN counterID INTEGER');
+      await db.execute(
+          'ALTER TABLE contagens ADD COLUMN counterName TEXT');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_counterID ON contagens (counterID)');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_countingMode ON contagens (countingMode)');
+    }
+    // Para futuras versões: if (oldVersion < 4) { ... }
   }
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
 
   /// Insere uma nova contagem com status Pendente (0).
+  ///
+  /// Para modo simples, [counterID] e [counterName] são opcionais.
+  /// Para modo múltiplo, informar obrigatoriamente o contador.
   Future<int> inserirContagem(
     String itemCode,
     double quantidade, {
     String warehouseCode = '01',
+    String countingMode = 'single',
+    int? counterID,
+    String? counterName,
   }) async {
     final db = await instance.database;
     return db.insert('contagens', {
@@ -78,6 +106,9 @@ class DatabaseHelper {
       'dataHora': DateTime.now().toIso8601String(),
       'syncStatus': 0,
       'warehouseCode': warehouseCode.toUpperCase(),
+      'countingMode': countingMode,
+      'counterID': counterID,
+      'counterName': counterName,
     });
   }
 
@@ -121,6 +152,30 @@ class DatabaseHelper {
     return db.query('contagens', orderBy: 'dataHora DESC');
   }
 
+  /// Retorna contagens filtradas por [counterID] (modo múltiplo).
+  Future<List<Map<String, dynamic>>> buscarContagensPorContador(
+      int counterID) async {
+    final db = await instance.database;
+    return db.query(
+      'contagens',
+      where: 'counterID = ?',
+      whereArgs: [counterID],
+      orderBy: 'dataHora DESC',
+    );
+  }
+
+  /// Retorna contagens filtradas por modo de contagem.
+  Future<List<Map<String, dynamic>>> buscarContagensPorModo(
+      String modo) async {
+    final db = await instance.database;
+    return db.query(
+      'contagens',
+      where: 'countingMode = ?',
+      whereArgs: [modo],
+      orderBy: 'dataHora DESC',
+    );
+  }
+
   /// Retorna apenas contagens Pendentes (0) ou com Erro (2), no formato FIFO.
   Future<List<Map<String, dynamic>>> buscarContagensPendentes() async {
     final db = await instance.database;
@@ -130,6 +185,19 @@ class DatabaseHelper {
       whereArgs: [0, 2],
       orderBy: 'dataHora ASC',
     );
+  }
+
+  /// Retorna os IDs distintos de contadores que participaram da contagem.
+  ///
+  /// Útil para montar o bloco `IndividualCounters` do payload SAP.
+  Future<List<Map<String, dynamic>>> buscarContadoresDistintos() async {
+    final db = await instance.database;
+    return db.rawQuery('''
+      SELECT DISTINCT counterID, counterName
+      FROM contagens
+      WHERE countingMode = 'multiple' AND counterID IS NOT NULL
+      ORDER BY counterID ASC
+    ''');
   }
 
   /// Calcula a soma total de quantidade para um [itemCode] específico.

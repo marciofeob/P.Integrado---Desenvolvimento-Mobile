@@ -13,6 +13,13 @@ import '../widgets/widgets.dart';
 ///
 /// Os dados são persistidos localmente via [DatabaseHelper] e
 /// sincronizados com o SAP Business One pela [HomePage].
+///
+/// O modo de contagem é detectado automaticamente:
+/// - Se há um `selected_doc_entry` em SharedPreferences → modo múltiplo
+///   (o gerente criou o doc no SAP, operador conta no app).
+/// - Caso contrário → modo simples (operador conta e sincroniza).
+///
+/// O `counterID` vem do `sap_user_internal_key` (salvo no login).
 class ContadorOfflinePage extends StatefulWidget {
   const ContadorOfflinePage({super.key});
 
@@ -31,6 +38,13 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   bool                       _scannerAtivo = false;
   bool                       _modoSelecao  = false;
   final Set<int>             _selecionados = {};
+
+  // ── Modo de contagem (auto-detectado) ──
+  bool    _isMultiplo   = false;
+  int?    _docEntry;
+  int?    _docNumber;
+  int?    _counterID;
+  String? _counterName;
 
   @override
   void initState() {
@@ -53,7 +67,22 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   Future<void> _carregarConfiguracoes() async {
     final prefs    = await SharedPreferences.getInstance();
     final deposito = prefs.getString('sap_deposito_padrao') ?? '01';
-    if (mounted) setState(() => _depositoController.text = deposito);
+
+    // Auto-detecta modo: se tem doc selecionado → múltiplo
+    final docEntry   = prefs.getInt('selected_doc_entry');
+    final docNumber  = prefs.getInt('selected_doc_number');
+    final counterID  = prefs.getInt('sap_user_internal_key');
+    final userName   = prefs.getString('UserName');
+
+    if (!mounted) return;
+    setState(() {
+      _depositoController.text = deposito;
+      _docEntry    = docEntry;
+      _docNumber   = docNumber;
+      _counterID   = counterID;
+      _counterName = userName;
+      _isMultiplo  = docEntry != null;
+    });
   }
 
   Future<void> _carregarContagens() async {
@@ -509,6 +538,9 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         itemCode,
         quantidade,
         warehouseCode: deposito,
+        countingMode: _isMultiplo ? 'multiple' : 'single',
+        counterID: _isMultiplo ? _counterID : null,
+        counterName: _isMultiplo ? _counterName : null,
       );
       await StoxAudio.play('sounds/check.mp3');
       if (!mounted) return;
@@ -522,6 +554,20 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       if (!mounted) return;
       StoxSnackbar.erro(context, 'Erro ao salvar: $e');
     }
+  }
+
+  /// Limpa o documento selecionado e volta ao modo simples.
+  Future<void> _sairModoEquipe() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('selected_doc_entry');
+    await prefs.remove('selected_doc_number');
+    if (!mounted) return;
+    setState(() {
+      _isMultiplo = false;
+      _docEntry = null;
+      _docNumber = null;
+    });
+    StoxSnackbar.sucesso(context, 'Voltou ao modo simples.');
   }
 
   // ── Edição ────────────────────────────────────────────────────────────────
@@ -625,7 +671,6 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                   return;
                 }
 
-                // Captura o Navigator antes do gap async
                 final navigator = Navigator.of(dialogCtx);
 
                 final db = await DatabaseHelper.instance.database;
@@ -678,7 +723,7 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (!_modoSelecao) ...[
-                  _buildBannerOffline(theme),
+                  _buildBanner(theme),
                   const SizedBox(height: 24),
                   StoxTextField(
                     controller: _codigoController,
@@ -748,8 +793,17 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   // ── Subwidgets do Build ───────────────────────────────────────────────────
 
   AppBar _buildAppBarNormal() => AppBar(
-        title: const Text('Contagem Offline'),
+        title: Text(_isMultiplo
+            ? 'Contagem em Equipe'
+            : 'Contagem Offline'),
         actions: [
+          if (_isMultiplo)
+            IconButton(
+              tooltip: 'Sair do modo equipe',
+              icon: Icon(Icons.exit_to_app_rounded,
+                  color: Colors.orange.shade700),
+              onPressed: _sairModoEquipe,
+            ),
           IconButton(
             tooltip: 'Exportar CSV',
             icon: const Icon(Icons.share_rounded),
@@ -775,27 +829,69 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         ],
       );
 
-  Widget _buildBannerOffline(ThemeData theme) => Container(
+  Widget _buildBanner(ThemeData theme) {
+    if (_isMultiplo) {
+      return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.blue.shade50,
+          color: Colors.purple.shade50,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.blue.shade100),
+          border: Border.all(color: Colors.purple.shade100),
         ),
-        child: Row(children: [
-          Icon(Icons.wifi_off_rounded, color: theme.primaryColor),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Modo Offline: os dados ficam salvos localmente no aparelho.',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(Icons.groups_rounded,
+                  color: Colors.purple.shade700, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Contagem em Equipe — Doc #${_docNumber ?? _docEntry}',
+                  style: TextStyle(
+                    color: Colors.purple.shade700,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            Text(
+              'Contador: ${_counterName ?? 'Não identificado'}',
               style: TextStyle(
-                  color: theme.primaryColor,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500),
+                color: Colors.purple.shade600,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade100),
+      ),
+      child: Row(children: [
+        Icon(Icons.wifi_off_rounded, color: theme.primaryColor),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            'Modo Offline: os dados ficam salvos localmente no aparelho.',
+            style: TextStyle(
+              color: theme.primaryColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
             ),
           ),
-        ]),
-      );
+        ),
+      ]),
+    );
+  }
 
   Widget _buildCabecalhoHistorico(ThemeData theme) => Row(children: [
         Icon(
@@ -961,7 +1057,9 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
               subtitle: Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Qtd: ${item['quantidade']}  •  Dep: $deposito',
+                  item['counterName'] != null
+                      ? 'Qtd: ${item['quantidade']}  •  Dep: $deposito  •  ${item['counterName']}'
+                      : 'Qtd: ${item['quantidade']}  •  Dep: $deposito',
                   style: TextStyle(
                       color: Colors.grey.shade700, fontWeight: FontWeight.w500),
                 ),

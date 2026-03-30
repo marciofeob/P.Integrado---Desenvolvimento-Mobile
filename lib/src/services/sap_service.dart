@@ -89,7 +89,10 @@ class SapService {
     }
   }
 
-  /// Busca o nome completo do operador pelo código de usuário SAP.
+  /// Busca o nome completo e InternalKey do operador pelo código de usuário SAP.
+  ///
+  /// Salva `InternalKey` em SharedPreferences como `sap_user_internal_key`.
+  /// Esse valor é usado como `CounterID` na contagem múltipla.
   static Future<String?> _buscarNomeOperador(String userCode) async {
     final prefs   = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url')     ?? '';
@@ -103,7 +106,7 @@ class SapService {
       client = await _getClient();
       final codigo = userCode.trim().replaceAll("'", "''");
       final uri    = Uri.parse(
-          '${_baseUrl(baseUrl)}Users?\$select=UserName&\$filter=UserCode eq \'$codigo\'');
+          '${_baseUrl(baseUrl)}Users?\$select=UserName,InternalKey&\$filter=UserCode eq \'$codigo\'');
 
       final response = await client.get(uri, headers: {
         'Cookie': _cookie(session, routeId),
@@ -112,7 +115,15 @@ class SapService {
 
       if (response.statusCode == 200) {
         final lista = (jsonDecode(response.body)['value'] as List?) ?? [];
-        if (lista.isNotEmpty) return lista.first['UserName'] as String?;
+        if (lista.isNotEmpty) {
+          final user = lista.first as Map<String, dynamic>;
+          // Salva InternalKey para uso como CounterID na contagem múltipla
+          final internalKey = user['InternalKey'] as int?;
+          if (internalKey != null) {
+            await prefs.setInt('sap_user_internal_key', internalKey);
+          }
+          return user['UserName'] as String?;
+        }
       }
     } catch (e) {
       if (kDebugMode) debugPrint('SapService._buscarNomeOperador: $e');
@@ -146,6 +157,7 @@ class SapService {
     await prefs.remove('B1SESSION');
     await prefs.remove('ROUTEID');
     await prefs.remove('UserName');
+    await prefs.remove('sap_user_internal_key');
   }
 
   // ── Consulta ──────────────────────────────────────────────────────────────
@@ -185,6 +197,40 @@ class SapService {
       if (response.statusCode == 401) await logout();
     } catch (e) {
       if (kDebugMode) debugPrint('SapService.searchItems: $e');
+    } finally {
+      client?.close();
+    }
+    return [];
+  }
+
+  /// Busca usuários SAP para configuração da equipe de contagem múltipla.
+  ///
+  /// Retorna lista de `{InternalKey, UserName, UserCode}` para seleção.
+  static Future<List<dynamic>> buscarUsuariosSap() async {
+    final prefs   = await SharedPreferences.getInstance();
+    final baseUrl = prefs.getString('sap_url')   ?? '';
+    final session = prefs.getString('B1SESSION') ?? '';
+    final routeId = prefs.getString('ROUTEID');
+
+    if (baseUrl.isEmpty || session.isEmpty) return [];
+
+    http.Client? client;
+    try {
+      client = await _getClient();
+      final uri = Uri.parse(
+          '${_baseUrl(baseUrl)}Users?\$select=InternalKey,UserName,UserCode');
+
+      final response = await client.get(uri, headers: {
+        'Cookie': _cookie(session, routeId),
+        'Accept': 'application/json',
+      }).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body)['value'] as List<dynamic>;
+      }
+      if (response.statusCode == 401) await logout();
+    } catch (e) {
+      if (kDebugMode) debugPrint('SapService.buscarUsuariosSap: $e');
     } finally {
       client?.close();
     }
@@ -239,13 +285,14 @@ class SapService {
     return null;
   }
 
-  // ── Inventário ────────────────────────────────────────────────────────────
+  // ── Inventário — Contador Simples ───────────────────────────────────────
 
-  /// Envia as contagens offline para o SAP Business One.
+  /// Cria um **novo** documento de contagem no SAP (modo contador simples).
   ///
   /// Retorna `null` em caso de sucesso ou uma mensagem de erro legível.
   static Future<String?> postInventoryCounting(
-      List<Map<String, dynamic>> contagens) async {
+    List<Map<String, dynamic>> contagens,
+  ) async {
     final prefs   = await SharedPreferences.getInstance();
     final baseUrl = prefs.getString('sap_url')   ?? '';
     final session = prefs.getString('B1SESSION') ?? '';
@@ -257,6 +304,7 @@ class SapService {
 
     final payload = {
       'CountDate': DateTime.now().toIso8601String().split('T')[0],
+      'CountingType': 'ctSingleCounter',
       'InventoryCountingLines': contagens.map((c) {
         final code = c['itemCode'].toString().trim().toUpperCase();
         final qtd  = double.tryParse(c['quantidade'].toString()) ?? 0.0;
@@ -272,20 +320,223 @@ class SapService {
       }).toList(),
     };
 
+    return _enviarRequest(baseUrl, session, routeId, 'POST',
+        'InventoryCountings', payload);
+  }
+
+  // ── Inventário — Contadores Múltiplos ─────────────────────────────────
+
+  /// Busca documentos de contagem **abertos** no SAP.
+  ///
+  /// Retorna a lista de documentos com `DocumentStatus eq 'cdsOpen'`.
+  /// Cada item contém: `DocumentEntry`, `DocumentNumber`, `CountDate`,
+  /// `CountingType`, `Remarks`, e a lista de `IndividualCounters`.
+  static Future<List<dynamic>> buscarDocumentosAbertos() async {
+    final prefs   = await SharedPreferences.getInstance();
+    final baseUrl = prefs.getString('sap_url')   ?? '';
+    final session = prefs.getString('B1SESSION') ?? '';
+    final routeId = prefs.getString('ROUTEID');
+
+    if (baseUrl.isEmpty || session.isEmpty) return [];
+
     http.Client? client;
     try {
       client = await _getClient();
-      final response = await client.post(
-        Uri.parse('${_baseUrl(baseUrl)}InventoryCountings'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept':       'application/json',
-          'Cookie':       _cookie(session, routeId),
-        },
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 30));
+      final uri = Uri.parse(
+          '${_baseUrl(baseUrl)}InventoryCountings'
+          '?\$select=DocumentEntry,DocumentNumber,CountDate,CountingType,Remarks,IndividualCounters'
+          "&\$filter=DocumentStatus eq 'cdsOpen'"
+          '&\$orderby=DocumentEntry desc');
 
-      if (response.statusCode == 200 || response.statusCode == 201) return null;
+      final response = await client.get(uri, headers: {
+        'Cookie': _cookie(session, routeId),
+        'Accept': 'application/json',
+      }).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        return (jsonDecode(response.body)['value'] as List?) ?? [];
+      }
+      if (response.statusCode == 401) await logout();
+    } catch (e) {
+      if (kDebugMode) debugPrint('SapService.buscarDocumentosAbertos: $e');
+    } finally {
+      client?.close();
+    }
+    return [];
+  }
+
+  /// Busca os detalhes completos de um documento de contagem (linhas + contadores).
+  ///
+  /// Usa o [documentEntry] (chave primária, não confundir com DocumentNumber).
+  static Future<Map<String, dynamic>?> buscarDetalhesDocumento(
+      int documentEntry) async {
+    final prefs   = await SharedPreferences.getInstance();
+    final baseUrl = prefs.getString('sap_url')   ?? '';
+    final session = prefs.getString('B1SESSION') ?? '';
+    final routeId = prefs.getString('ROUTEID');
+
+    if (baseUrl.isEmpty || session.isEmpty) return null;
+
+    http.Client? client;
+    try {
+      client = await _getClient();
+      final uri = Uri.parse(
+          '${_baseUrl(baseUrl)}InventoryCountings($documentEntry)');
+
+      final response = await client.get(uri, headers: {
+        'Cookie': _cookie(session, routeId),
+        'Accept': 'application/json',
+      }).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+      if (response.statusCode == 401) await logout();
+    } catch (e) {
+      if (kDebugMode) debugPrint('SapService.buscarDetalhesDocumento: $e');
+    } finally {
+      client?.close();
+    }
+    return null;
+  }
+
+  /// Atualiza um documento de contagem **existente** via PATCH (modo múltiplo).
+  ///
+  /// O SAP B1 valida consistência entre linhas do mesmo `LineNumber`:
+  /// todas devem ter o mesmo `Counted` (Y ou N). Por isso o PATCH precisa
+  /// enviar **TODAS** as linhas do documento — atualizando as deste
+  /// [counterID] e mantendo as dos outros contadores inalteradas.
+  ///
+  /// Fluxo:
+  /// 1. GET o documento completo
+  /// 2. Para cada linha: se é do nosso counterID e temos contagem → atualiza
+  /// 3. Envia TODAS as linhas no PATCH
+  ///
+  /// Retorna `null` em caso de sucesso ou uma mensagem de erro legível.
+  static Future<String?> patchInventoryCounting({
+    required int documentEntry,
+    required List<Map<String, dynamic>> contagens,
+    required int counterID,
+  }) async {
+    final prefs   = await SharedPreferences.getInstance();
+    final baseUrl = prefs.getString('sap_url')   ?? '';
+    final session = prefs.getString('B1SESSION') ?? '';
+    final routeId = prefs.getString('ROUTEID');
+
+    if (baseUrl.isEmpty || session.isEmpty) {
+      return 'Sessão expirada. Faça login novamente.';
+    }
+
+    // 1. GET o documento completo
+    final doc = await buscarDetalhesDocumento(documentEntry);
+    if (doc == null) {
+      return 'Não foi possível carregar o documento #$documentEntry do SAP.';
+    }
+
+    final linhasDoc = (doc['InventoryCountingLines'] as List?) ?? [];
+    if (linhasDoc.isEmpty) {
+      return 'O documento #$documentEntry não possui linhas de contagem.';
+    }
+
+    // Mapa das contagens do operador: ItemCode (uppercase) → quantidade
+    final contagensMap = <String, double>{};
+    for (final c in contagens) {
+      final code = c['itemCode'].toString().trim().toUpperCase();
+      final qtd  = double.tryParse(c['quantidade'].toString()) ?? 0.0;
+      contagensMap[code] = qtd;
+    }
+
+    // 2. Reconstrói TODAS as linhas do documento
+    final todasLinhas = <Map<String, dynamic>>[];
+    int atualizadas = 0;
+
+    for (final linha in linhasDoc) {
+      final cid      = linha['CounterID'] as int? ?? 0;
+      final code     = (linha['ItemCode'] as String? ?? '').toUpperCase();
+      final lineNum  = linha['LineNumber'] as int? ?? 0;
+
+      // É a linha deste contador E temos contagem para este item?
+      if (cid == counterID && contagensMap.containsKey(code)) {
+        final qtd = contagensMap[code]!;
+        todasLinhas.add({
+          'LineNumber':      lineNum,
+          'CounterID':       counterID,
+          'CounterType':     'ctUser',
+          'CountedQuantity': qtd,
+          'Counted':         'tNO',
+        });
+        atualizadas++;
+      } else {
+        // Linha de outro contador ou item que não contamos → manda como está
+        todasLinhas.add({
+          'LineNumber':      lineNum,
+          'CounterID':       cid,
+          'CounterType':     linha['CounterType'] ?? 'ctUser',
+          'CountedQuantity': linha['CountedQuantity'] ?? 0.0,
+          'Counted':         linha['Counted'] ?? 'tNO',
+        });
+      }
+    }
+
+    if (atualizadas == 0) {
+      final faltando = contagensMap.keys.toList();
+      return 'Nenhum item da sua contagem foi encontrado no documento SAP.\n'
+          'Itens: ${faltando.join(', ')}.\n'
+          'Verifique se o documento correto foi selecionado.';
+    }
+
+    // 3. PATCH com TODAS as linhas
+    final payload = {
+      'InventoryCountingLines': todasLinhas,
+    };
+
+    return _enviarRequest(baseUrl, session, routeId, 'PATCH',
+        'InventoryCountings($documentEntry)', payload);
+  }
+
+  /// Retorna o `InternalKey` do usuário logado (salvo no login).
+  ///
+  /// Usado como `CounterID` na contagem múltipla.
+  static Future<int?> getCounterID() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('sap_user_internal_key');
+  }
+
+  // ── Request genérico ──────────────────────────────────────────────────
+
+  /// Envia POST ou PATCH para o Service Layer e trata a resposta.
+  static Future<String?> _enviarRequest(
+    String baseUrl,
+    String session,
+    String? routeId,
+    String metodo,
+    String endpoint,
+    Map<String, dynamic> payload,
+  ) async {
+    http.Client? client;
+    try {
+      client = await _getClient();
+
+      final uri     = Uri.parse('${_baseUrl(baseUrl)}$endpoint');
+      final headers = {
+        'Content-Type': 'application/json',
+        'Accept':       'application/json',
+        'Cookie':       _cookie(session, routeId),
+      };
+      final body = jsonEncode(payload);
+
+      final response = metodo == 'PATCH'
+          ? await client.patch(uri, headers: headers, body: body)
+              .timeout(const Duration(seconds: 30))
+          : await client.post(uri, headers: headers, body: body)
+              .timeout(const Duration(seconds: 30));
+
+      // 200, 201 = sucesso POST; 204 = sucesso PATCH
+      if (response.statusCode == 200 ||
+          response.statusCode == 201 ||
+          response.statusCode == 204) {
+        return null;
+      }
 
       if (response.statusCode == 401) {
         await logout();

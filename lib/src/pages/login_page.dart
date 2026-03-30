@@ -94,7 +94,6 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    // Captura a altura da barra de navegação do sistema (botões do Android)
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
@@ -184,16 +183,10 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
 
-                    const SizedBox(height: 24), // Espaço antes da logo
+                    const SizedBox(height: 24),
 
-                    // Logo FEOB (SAP removida daqui)
-                    Image.asset('assets/images/unifeob.png', height: 35),
-
-                    const SizedBox(height: 12),
-
-                    // Texto institucional
                     Text(
-                      'STOX v1.0.0\nDesenvolvido pelos alunos do curso de Análise e Desenvolvimento de Sistemas 2026.',
+                      'STOX v1.0.0 — Grupo JCN',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 11,
@@ -201,7 +194,6 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
 
-                    // Espaço adaptativo final para não cortar o texto
                     SizedBox(height: bottomPadding > 0 ? bottomPadding + 16 : 24),
                   ],
                 ),

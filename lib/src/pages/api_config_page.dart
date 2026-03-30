@@ -74,13 +74,11 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
-    // Captura a altura da barra de navegação do sistema (botões do Android)
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Configuração SAP'),
-        // Remove a seta automática de voltar
         automaticallyImplyLeading: false,
         centerTitle: true,
       ),
@@ -153,7 +151,6 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
                             ),
                           ),
                           value: _permitirSslInseguro,
-                          // Correção do membro depreciado
                           activeThumbColor: primaryColor,
                           onChanged: (value) {
                             HapticFeedback.selectionClick();
@@ -178,15 +175,10 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
                         onPressed: () => Navigator.pop(context),
                       ),
 
-                      const SizedBox(height: 24), // Espaço antes da logo
-
-                      // Logo FEOB (SAP removida daqui)
-                      Image.asset('assets/images/unifeob.png', height: 35),
-
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 24),
 
                       Text(
-                        'STOX v1.0.0\nDesenvolvido pelos alunos do curso de Análise e Desenvolvimento de Sistemas 2026.',
+                        'STOX v1.0.0 — Grupo JCN',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 11,
@@ -194,7 +186,6 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
                         ),
                       ),
 
-                      // Espaço adaptativo final para não cortar o texto
                       SizedBox(height: bottomPadding > 0 ? bottomPadding + 16 : 24),
                     ],
                   ),

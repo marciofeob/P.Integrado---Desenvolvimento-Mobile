@@ -15,6 +15,7 @@ import 'login_page.dart';
 import 'contador_offline_page.dart';
 import 'api_config_page.dart';
 import 'item_search_page.dart';
+import 'import_page.dart';
 
 /// Painel principal do STOX.
 ///
@@ -35,6 +36,10 @@ class _HomePageState extends State<HomePage> {
   String _nomeOperador = 'Operador...';
   bool _sapConectado = false;
   bool _semInternet = false;
+
+  // ── Contagem múltipla ──
+  List<dynamic> _documentosAbertos = [];
+  bool _carregandoDocs = false;
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
@@ -68,7 +73,6 @@ class _HomePageState extends State<HomePage> {
       }
     });
 
-    // Verifica estado inicial
     Connectivity().checkConnectivity().then((results) {
       if (!mounted) return;
       final offline = results.every((r) => r == ConnectivityResult.none);
@@ -109,6 +113,241 @@ class _HomePageState extends State<HomePage> {
     setState(() => _sapConectado = conectado);
   }
 
+  // ── Documentos abertos SAP (contagem múltipla) ────────────────────────────
+
+  Future<void> _carregarDocumentosAbertos() async {
+    setState(() => _carregandoDocs = true);
+    try {
+      final docs = await SapService.buscarDocumentosAbertos();
+      if (!mounted) return;
+      setState(() {
+        _documentosAbertos = docs;
+        _carregandoDocs = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregandoDocs = false);
+      StoxSnackbar.erro(context, 'Erro ao buscar documentos: $e');
+    }
+  }
+
+  void _mostrarDocumentosAbertos() {
+    Navigator.pop(context); // fecha o drawer
+    _carregarDocumentosAbertos().then((_) {
+      if (!mounted) return;
+
+      if (_documentosAbertos.isEmpty) {
+        StoxSnackbar.aviso(
+          context,
+          'Nenhum documento de contagem aberto no SAP.',
+        );
+        return;
+      }
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (sheetCtx) => _buildDocumentosSheet(sheetCtx),
+      );
+    });
+  }
+
+  Widget _buildDocumentosSheet(BuildContext sheetCtx) {
+    final theme = Theme.of(context);
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(sheetCtx).size.height * 0.7,
+      ),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Container(
+            width: 48,
+            height: 6,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+            child: Row(children: [
+              Icon(Icons.assignment_rounded,
+                  color: theme.primaryColor, size: 24),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Documentos de Contagem Abertos',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 17,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () => Navigator.pop(sheetCtx),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              'Selecione o documento criado pelo gerente para iniciar a contagem em equipe.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (_carregandoDocs)
+            const Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                itemCount: _documentosAbertos.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (_, i) {
+                  final doc = _documentosAbertos[i] as Map<String, dynamic>;
+                  return _buildDocCard(doc, sheetCtx);
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDocCard(Map<String, dynamic> doc, BuildContext sheetCtx) {
+    final theme = Theme.of(context);
+    final docNum = doc['DocumentNumber'] ?? '?';
+    final docEntry = doc['DocumentEntry'] as int? ?? 0;
+    final countDate = doc['CountDate']?.toString().split('T').first ?? '';
+    final tipo = doc['CountingType']?.toString() ?? '';
+    final isMultiplo = tipo == 'ctMultipleCounters';
+    final contadores = (doc['IndividualCounters'] as List?) ?? [];
+    final remarks = doc['Remarks']?.toString() ?? '';
+
+    return StoxCard(
+      borderColor: isMultiplo
+          ? Colors.purple.shade200
+          : Colors.blue.shade200,
+      child: InkWell(
+        onTap: () async {
+          HapticFeedback.selectionClick();
+          Navigator.pop(sheetCtx); // fecha bottom sheet
+
+          // Salva docEntry selecionado
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt('selected_doc_entry', docEntry);
+          await prefs.setInt('selected_doc_number', docNum is int ? docNum : 0);
+
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            StoxApp.transicaoPadrao(const ContadorOfflinePage()),
+          ).then((_) => _carregarContagens());
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(
+                  isMultiplo ? Icons.groups_rounded : Icons.person_rounded,
+                  color: isMultiplo
+                      ? Colors.purple.shade700
+                      : theme.primaryColor,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Doc #$docNum',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isMultiplo
+                        ? Colors.purple.shade50
+                        : Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    isMultiplo ? 'Múltiplo' : 'Simples',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isMultiplo
+                          ? Colors.purple.shade700
+                          : Colors.blue.shade700,
+                    ),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Data: $countDate',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+              ),
+              if (contadores.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Contadores: ${contadores.map((c) => c['CounterName']).join(', ')}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              if (remarks.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  remarks,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade500,
+                      fontStyle: FontStyle.italic),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: 8),
+              Row(children: [
+                Icon(Icons.touch_app_rounded,
+                    size: 14, color: theme.primaryColor),
+                const SizedBox(width: 4),
+                Text(
+                  'Toque para iniciar contagem',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.primaryColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Exportação ────────────────────────────────────────────────────────────
 
   Future<void> _exportarRelatorio() async {
@@ -146,9 +385,42 @@ class _HomePageState extends State<HomePage> {
     setState(() => _carregando = true);
 
     try {
-      final erro = await SapService.postInventoryCounting(_contagens);
+      // Separa contagens por modo
+      final simples = _contagens
+          .where((c) => c['countingMode'] != 'multiple')
+          .toList();
+      final multiplos = _contagens
+          .where((c) => c['countingMode'] == 'multiple')
+          .toList();
 
-      if (erro == null) {
+      String? erroFinal;
+
+      // 1. Sincroniza itens do modo simples (POST novo documento)
+      if (simples.isNotEmpty) {
+        final erro = await SapService.postInventoryCounting(simples);
+        if (erro != null) erroFinal = erro;
+      }
+
+      // 2. Sincroniza itens do modo múltiplo (PATCH documento existente)
+      if (multiplos.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        final docEntry = prefs.getInt('selected_doc_entry');
+        final counterID = await SapService.getCounterID();
+
+        if (docEntry == null || counterID == null) {
+          erroFinal ??= 'Documento ou contador não identificado. '
+              'Selecione um documento de contagem no menu antes de sincronizar.';
+        } else {
+          final erro = await SapService.patchInventoryCounting(
+            documentEntry: docEntry,
+            contagens: multiplos,
+            counterID: counterID,
+          );
+          if (erro != null) erroFinal = erro;
+        }
+      }
+
+      if (erroFinal == null) {
         await StoxAudio.play('sounds/check.mp3');
         await DatabaseHelper.instance.limparContagens();
         await _carregarContagens();
@@ -157,7 +429,7 @@ class _HomePageState extends State<HomePage> {
       } else {
         await StoxAudio.play('sounds/fail.mp3', isFail: true);
         if (!mounted) return;
-        _exibirErroSap(erro);
+        _exibirErroSap(erroFinal);
       }
     } catch (e) {
       await StoxAudio.play('sounds/fail.mp3', isFail: true);
@@ -236,23 +508,29 @@ class _HomePageState extends State<HomePage> {
     int pontoItem = 0;
     int pontoDeposito = 0;
 
-    if (msg.contains('-4002')) { pontoItem += 10; }
-    if (msg.contains('ITEM NOT FOUND')) { pontoItem += 8; }
-    if (msg.contains('INVALID ITEM')) { pontoItem += 8; }
-    if (msg.contains('ITEM') && msg.contains('NOT EXIST')) { pontoItem += 7; }
-    if (msg.contains('ITEM') && msg.contains('NOT FOUND')) { pontoItem += 6; }
-    if (msg.contains('ITEM') && msg.contains('INVALID')) { pontoItem += 5; }
-    if (msg.contains('ITEM CODE')) { pontoItem += 4; }
-    if (msg.contains('ITEM') && msg.contains('UNKNOWN')) { pontoItem += 4; }
-    if (itemEncontrado.isNotEmpty) { pontoItem += 3; }
+    if (msg.contains('-4002')) pontoItem += 10;
+    if (msg.contains('ITEM NOT FOUND')) pontoItem += 8;
+    if (msg.contains('INVALID ITEM')) pontoItem += 8;
+    if (msg.contains('ITEM') && msg.contains('NOT EXIST')) pontoItem += 7;
+    if (msg.contains('ITEM') && msg.contains('NOT FOUND')) pontoItem += 6;
+    if (msg.contains('ITEM') && msg.contains('INVALID')) pontoItem += 5;
+    if (msg.contains('ITEM CODE')) pontoItem += 4;
+    if (msg.contains('ITEM') && msg.contains('UNKNOWN')) pontoItem += 4;
+    if (itemEncontrado.isNotEmpty) pontoItem += 3;
 
-    if (msg.contains('-5002')) { pontoDeposito += 10; }
-    if (msg.contains('WAREHOUSE NOT FOUND')) { pontoDeposito += 8; }
-    if (msg.contains('INVALID WAREHOUSE')) { pontoDeposito += 8; }
-    if (msg.contains('WAREHOUSE') && msg.contains('NOT FOUND')) { pontoDeposito += 6; }
-    if (msg.contains('WAREHOUSE') && msg.contains('INVALID')) { pontoDeposito += 5; }
-    if (msg.contains('WAREHOUSECODE') && msg.contains('NOT FOUND')) { pontoDeposito += 6; }
-    if (msg.contains('WAREHOUSE') && pontoDeposito == 0) { pontoDeposito += 1; }
+    if (msg.contains('-5002')) pontoDeposito += 10;
+    if (msg.contains('WAREHOUSE NOT FOUND')) pontoDeposito += 8;
+    if (msg.contains('INVALID WAREHOUSE')) pontoDeposito += 8;
+    if (msg.contains('WAREHOUSE') && msg.contains('NOT FOUND')) {
+      pontoDeposito += 6;
+    }
+    if (msg.contains('WAREHOUSE') && msg.contains('INVALID')) {
+      pontoDeposito += 5;
+    }
+    if (msg.contains('WAREHOUSECODE') && msg.contains('NOT FOUND')) {
+      pontoDeposito += 6;
+    }
+    if (msg.contains('WAREHOUSE') && pontoDeposito == 0) pontoDeposito += 1;
 
     if (pontoItem > pontoDeposito && pontoItem > 0) {
       return _ErroSap(
@@ -461,7 +739,6 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(
         child: Column(
           children: [
-            // ── Banner offline persistente ──
             if (_semInternet) _buildOfflineBanner(),
 
             if (_carregando) const StoxLinearLoading(),
@@ -588,7 +865,11 @@ class _HomePageState extends State<HomePage> {
                 label: 'Contagem',
                 sub: 'Modo offline',
                 cor: theme.primaryColor,
-                onTap: () {
+                onTap: () async {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.remove('selected_doc_entry');
+                  await prefs.remove('selected_doc_number');
+                  if (!mounted) return;
                   Navigator.push(
                     context,
                     StoxApp.transicaoPadrao(const ContadorOfflinePage()),
@@ -676,7 +957,6 @@ class _HomePageState extends State<HomePage> {
   // ── Chip de conexão SAP ───────────────────────────────────────────────────
 
   Widget _buildChipConexao() {
-    // Sem internet = sempre vermelho
     if (_semInternet) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -739,15 +1019,20 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildItemContagem(Map<String, dynamic> item) {
     final deposito = item['warehouseCode'] ?? '01';
+    final isMultiplo = item['countingMode'] == 'multiple';
     return StoxCard(
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: CircleAvatar(
-          backgroundColor: Theme.of(context).primaryColor.withAlpha(26),
+          backgroundColor: isMultiplo
+              ? Colors.purple.shade50
+              : Theme.of(context).primaryColor.withAlpha(26),
           radius: 22,
           child: Icon(
-            Icons.inventory_2_rounded,
-            color: Theme.of(context).primaryColor,
+            isMultiplo ? Icons.groups_rounded : Icons.inventory_2_rounded,
+            color: isMultiplo
+                ? Colors.purple.shade700
+                : Theme.of(context).primaryColor,
             size: 22,
           ),
         ),
@@ -758,7 +1043,9 @@ class _HomePageState extends State<HomePage> {
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Text(
-            'Qtd: ${item['quantidade']}  •  Dep: $deposito',
+            item['counterName'] != null
+                ? 'Qtd: ${item['quantidade']}  •  Dep: $deposito  •  ${item['counterName']}'
+                : 'Qtd: ${item['quantidade']}  •  Dep: $deposito',
             style: TextStyle(color: Colors.grey.shade700),
           ),
         ),
@@ -785,40 +1072,42 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildEmptyState() => Padding(
-    padding: const EdgeInsets.only(top: 40),
-    child: Center(
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.green.shade50,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.cloud_done_rounded,
-              size: 64,
-              color: Colors.green.shade400,
-            ),
+        padding: const EdgeInsets.only(top: 40),
+        child: Center(
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.cloud_done_rounded,
+                  size: 64,
+                  color: Colors.green.shade400,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Tudo sincronizado!',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Não há contagens pendentes para envio.',
+                style: TextStyle(color: Colors.grey.shade600),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
-          Text(
-            'Tudo sincronizado!',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey.shade800,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Não há contagens pendentes para envio.',
-            style: TextStyle(color: Colors.grey.shade600),
-          ),
-        ],
-      ),
-    ),
-  );
+        ),
+      );
+
+  // ── Drawer ────────────────────────────────────────────────────────────────
 
   Widget _buildDrawer() {
     final theme = Theme.of(context);
@@ -865,24 +1154,107 @@ class _HomePageState extends State<HomePage> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
+                // ── Contagem Simples ──
                 ListTile(
                   leading: Icon(
                     Icons.add_box_rounded,
                     color: theme.primaryColor,
                   ),
                   title: const Text(
-                    'Contagem Offline',
+                    'Contagem Simples',
                     style: TextStyle(fontWeight: FontWeight.w500),
                   ),
-                  onTap: () {
+                  subtitle: Text(
+                    'Um operador conta e sincroniza',
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                  onTap: () async {
                     HapticFeedback.selectionClick();
                     Navigator.pop(context);
+                    // Limpa doc selecionado para garantir modo simples
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.remove('selected_doc_entry');
+                    await prefs.remove('selected_doc_number');
+                    if (!mounted) return;
                     Navigator.push(
                       context,
                       StoxApp.transicaoPadrao(const ContadorOfflinePage()),
                     ).then((_) => _carregarContagens());
                   },
                 ),
+
+                // ── Contagem em Equipe ──
+                ListTile(
+                  leading: Icon(
+                    Icons.groups_rounded,
+                    color: _sapConectado
+                        ? Colors.purple.shade700
+                        : Colors.grey.shade400,
+                  ),
+                  title: Text(
+                    'Contagem em Equipe',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      color: _sapConectado ? null : Colors.grey.shade400,
+                    ),
+                  ),
+                  subtitle: Text(
+                    _sapConectado
+                        ? 'Selecionar documento do SAP'
+                        : 'Faça login no SAP primeiro',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _sapConectado
+                          ? Colors.grey.shade500
+                          : Colors.grey.shade400,
+                    ),
+                  ),
+                  trailing: _carregandoDocs
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.purple.shade400,
+                          ),
+                        )
+                      : null,
+                  enabled: _sapConectado && !_semInternet,
+                  onTap: _mostrarDocumentosAbertos,
+                ),
+
+                // ── Importar Contagem ──
+                ListTile(
+                  leading: Icon(
+                    Icons.upload_file_rounded,
+                    color: Colors.orange.shade700,
+                  ),
+                  title: const Text(
+                    'Importar Contagem',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: Text(
+                    'CSV de outro STOX ou coletor',
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      StoxApp.transicaoPadrao(const ImportPage()),
+                    ).then((_) => _carregarContagens());
+                  },
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Divider(color: Colors.grey.shade200),
+                ),
+
+                // ── Pesquisar Item ──
                 ListTile(
                   leading: Icon(
                     Icons.search_rounded,
@@ -901,10 +1273,13 @@ class _HomePageState extends State<HomePage> {
                     );
                   },
                 ),
+
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Divider(color: Colors.grey.shade200),
                 ),
+
+                // ── Configurações ──
                 ListTile(
                   leading: Icon(
                     Icons.settings_rounded,

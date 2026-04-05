@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/database_helper.dart';
@@ -8,11 +8,12 @@ import '../services/export_service.dart';
 import '../services/ocr_service.dart';
 import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
+import 'stox_scanner_page.dart';
 
 /// Tela de contagem de estoque offline.
 ///
 /// Os dados são persistidos localmente via [DatabaseHelper] e
-/// sincronizados com o SAP Business One pela [HomePage].
+/// sincronizados com o SAP Business One pela `HomePage`.
 ///
 /// O modo de contagem é detectado automaticamente:
 /// - Se há um `selected_doc_entry` em SharedPreferences → modo múltiplo
@@ -20,6 +21,14 @@ import '../widgets/widgets.dart';
 /// - Caso contrário → modo simples (operador conta e sincroniza).
 ///
 /// O `counterID` vem do `sap_user_internal_key` (salvo no login).
+///
+/// Funcionalidades:
+/// - Leitura por código de barras ([StoxScannerPage])
+/// - Leitura por OCR ([OcrService])
+/// - Detecção e tratamento de duplicatas
+/// - Seleção múltipla com exclusão em lote
+/// - Edição inline de quantidade e depósito
+/// - Exportação CSV
 class ContadorOfflinePage extends StatefulWidget {
   const ContadorOfflinePage({super.key});
 
@@ -28,22 +37,22 @@ class ContadorOfflinePage extends StatefulWidget {
 }
 
 class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
-  final _codigoController     = TextEditingController();
+  final _codigoController = TextEditingController();
   final _quantidadeController = TextEditingController(text: '1');
-  final _depositoController   = TextEditingController(text: '01');
-  final _focusNodeCodigo      = FocusNode();
+  final _depositoController = TextEditingController(text: '01');
+  final _focusNodeCodigo = FocusNode();
 
-  List<Map<String, dynamic>> _contagens    = [];
-  bool                       _iniciando    = true;
-  bool                       _scannerAtivo = false;
-  bool                       _modoSelecao  = false;
-  final Set<int>             _selecionados = {};
+  List<Map<String, dynamic>> _contagens = [];
+  bool _iniciando = true;
+  bool _modoSelecao = false;
+  final Set<int> _selecionados = {};
 
   // ── Modo de contagem (auto-detectado) ──
-  bool    _isMultiplo   = false;
-  int?    _docEntry;
-  int?    _docNumber;
-  int?    _counterID;
+  bool _isMultiplo = false;
+  bool _isSimpleDoc = false;
+  int? _docEntry;
+  int? _docNumber;
+  int? _counterID;
   String? _counterName;
 
   @override
@@ -65,23 +74,24 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   // ── Dados ─────────────────────────────────────────────────────────────────
 
   Future<void> _carregarConfiguracoes() async {
-    final prefs    = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
     final deposito = prefs.getString('sap_deposito_padrao') ?? '01';
 
-    // Auto-detecta modo: se tem doc selecionado → múltiplo
-    final docEntry   = prefs.getInt('selected_doc_entry');
-    final docNumber  = prefs.getInt('selected_doc_number');
-    final counterID  = prefs.getInt('sap_user_internal_key');
-    final userName   = prefs.getString('UserName');
+    final docEntry = prefs.getInt('selected_doc_entry');
+    final docNumber = prefs.getInt('selected_doc_number');
+    final docType = prefs.getString('selected_doc_type');
+    final counterID = prefs.getInt('sap_user_internal_key');
+    final userName = prefs.getString('UserName');
 
     if (!mounted) return;
     setState(() {
       _depositoController.text = deposito;
-      _docEntry    = docEntry;
-      _docNumber   = docNumber;
-      _counterID   = counterID;
+      _docEntry = docEntry;
+      _docNumber = docNumber;
+      _counterID = counterID;
       _counterName = userName;
-      _isMultiplo  = docEntry != null;
+      _isMultiplo = docType == 'ctMultipleCounters';
+      _isSimpleDoc = docType == 'ctSingleCounter';
     });
   }
 
@@ -91,7 +101,9 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     setState(() {
       _contagens = lista;
       _iniciando = false;
-      _selecionados.removeWhere((id) => !lista.any((c) => c['id'] == id));
+      _selecionados.removeWhere(
+        (id) => !lista.any((c) => c['id'] == id),
+      );
     });
   }
 
@@ -137,14 +149,14 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   Future<void> _excluirSelecionados() async {
     if (_selecionados.isEmpty) return;
 
-    final qtd        = _selecionados.length;
+    final qtd = _selecionados.length;
     final todosItens = qtd == _contagens.length;
 
     final confirmado = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _DialogoConfirmacaoExclusao(
-        quantidade:   qtd,
+        quantidade: qtd,
         isTodosItens: todosItens,
         itens: _contagens
             .where((c) => _selecionados.contains(c['id']))
@@ -177,16 +189,16 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
 
   Map<String, dynamic>? _buscarDuplicata(String itemCode) {
     final codigo = itemCode.trim().toUpperCase();
-    try {
-      return _contagens
-          .firstWhere((c) => c['itemCode'].toString().toUpperCase() == codigo);
-    } catch (_) {
-      return null;
-    }
+    final index = _contagens.indexWhere(
+      (c) => c['itemCode'].toString().toUpperCase() == codigo,
+    );
+    return index >= 0 ? _contagens[index] : null;
   }
 
   Future<bool> _exibirDialogoDuplicata(
-      Map<String, dynamic> existente, double novaQuantidade) async {
+    Map<String, dynamic> existente,
+    double novaQuantidade,
+  ) async {
     await StoxAudio.play('sounds/error_beep.mp3', isError: true);
     if (!mounted) return false;
 
@@ -194,24 +206,30 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       context: context,
       barrierDismissible: false,
       builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
         titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        title: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.orange.shade50,
-              borderRadius: BorderRadius.circular(8),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.warning_amber_rounded,
+                  color: Colors.orange.shade700, size: 24),
             ),
-            child: Icon(Icons.warning_amber_rounded,
-                color: Colors.orange.shade700, size: 24),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text('Item já contado',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
-        ]),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Item já contado',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -224,18 +242,18 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
             const SizedBox(height: 16),
             StoxCard(
               padding: const EdgeInsets.all(12),
-              child: Column(children: [
-                _linhaComparativo(
-                    'Quantidade atual', '${existente['quantidade']}',
-                    Colors.grey.shade700),
-                const SizedBox(height: 8),
-                _linhaComparativo('Nova quantidade', '$novaQuantidade',
-                    Colors.orange.shade700,
-                    negrito: true),
-                const SizedBox(height: 8),
-                _linhaComparativo('Depósito',
-                    existente['warehouseCode'] ?? '01', Colors.grey.shade700),
-              ]),
+              child: Column(
+                children: [
+                  _linhaComparativo('Quantidade atual',
+                      '${existente['quantidade']}', Colors.grey.shade700),
+                  const SizedBox(height: 8),
+                  _linhaComparativo('Nova quantidade', '$novaQuantidade',
+                      Colors.orange.shade700, negrito: true),
+                  const SizedBox(height: 8),
+                  _linhaComparativo('Depósito',
+                      existente['warehouseCode'] ?? '01', Colors.grey.shade700),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             Container(
@@ -296,20 +314,24 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       children: [
         Text(label,
             style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-        Text(valor,
-            style: TextStyle(
-                fontSize: 13,
-                color: cor,
-                fontWeight: negrito ? FontWeight.bold : FontWeight.w500)),
+        Text(
+          valor,
+          style: TextStyle(
+            fontSize: 13,
+            color: cor,
+            fontWeight: negrito ? FontWeight.bold : FontWeight.w500,
+          ),
+        ),
       ],
     );
   }
 
-  void _ajustarQuantidade(double valor, {TextEditingController? controller}) {
+  void _ajustarQuantidade(double valor,
+      {TextEditingController? controller}) {
     HapticFeedback.selectionClick();
     final target = controller ?? _quantidadeController;
-    final atual  = double.tryParse(target.text.replaceAll(',', '.')) ?? 0;
-    final novo   = (atual + valor).clamp(0.0, double.infinity);
+    final atual = double.tryParse(target.text.replaceAll(',', '.')) ?? 0;
+    final novo = (atual + valor).clamp(0.0, double.infinity);
     setState(() {
       target.text = novo % 1 == 0
           ? novo.toInt().toString()
@@ -328,7 +350,8 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       return;
     }
     try {
-      final exportado = await ExportService.exportarContagensParaCSV(_contagens);
+      final exportado =
+          await ExportService.exportarContagensParaCSV(_contagens);
       if (!mounted) return;
       if (exportado) {
         await StoxAudio.play('sounds/check.mp3');
@@ -367,130 +390,32 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     }
   }
 
-  void _abrirScanner() {
+  /// Abre a [StoxScannerPage] e preenche o campo de código com o resultado.
+  Future<void> _abrirScanner() async {
     HapticFeedback.lightImpact();
     FocusScope.of(context).unfocus();
-    _scannerAtivo = false;
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => LayoutBuilder(
-        builder: (_, constraints) {
-          final scanWindow = Rect.fromCenter(
-            center: Offset(constraints.maxWidth / 2, 200),
-            width: 280,
-            height: 180,
-          );
-          return Container(
-            height: MediaQuery.of(sheetCtx).size.height * 0.85,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: SafeArea(
-              child: Column(children: [
-                const SizedBox(height: 12),
-                Container(
-                  width: 48,
-                  height: 6,
-                  decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-                AppBar(
-                  title: const Text('Escanear Código',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  centerTitle: true,
-                  backgroundColor: Colors.transparent,
-                  foregroundColor: Colors.black87,
-                  elevation: 0,
-                  automaticallyImplyLeading: false,
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () {
-                        HapticFeedback.selectionClick();
-                        Navigator.pop(sheetCtx);
-                      },
-                    ),
-                  ],
-                ),
-                Expanded(
-                  child: Stack(children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: MobileScanner(
-                        scanWindow: scanWindow,
-                        onDetect: (capture) {
-                          if (_scannerAtivo) return;
-                          final barcodes = capture.barcodes;
-                          if (barcodes.isEmpty) return;
-                          _scannerAtivo = true;
-                          final code = barcodes.first.rawValue ?? '';
-                          _codigoController.text = code;
-                          Navigator.of(sheetCtx).pop();
-                          StoxAudio.play('sounds/beep.mp3');
-                          _focusNodeCodigo.nextFocus();
-                        },
-                      ),
-                    ),
-                    ColorFiltered(
-                      colorFilter: ColorFilter.mode(
-                          Colors.black.withAlpha(179), BlendMode.srcOut),
-                      child: Stack(children: [
-                        Container(
-                            decoration: const BoxDecoration(
-                                color: Colors.black,
-                                backgroundBlendMode: BlendMode.dstOut)),
-                        Center(
-                          child: Container(
-                            width: scanWindow.width,
-                            height: scanWindow.height,
-                            decoration: BoxDecoration(
-                                color: Colors.red,
-                                borderRadius: BorderRadius.circular(16)),
-                          ),
-                        ),
-                      ]),
-                    ),
-                    Center(
-                      child: Container(
-                        width: scanWindow.width,
-                        height: scanWindow.height,
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                              color: Theme.of(sheetCtx).primaryColor,
-                              width: 3),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                    ),
-                  ]),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Text(
-                    'Alinhe o código de barras dentro do quadro',
-                    style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ]),
-            ),
-          );
-        },
+    final codigo = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const StoxScannerPage(
+          titulo: 'Escanear Item do Inventário',
+        ),
       ),
     );
+
+    if (codigo != null && codigo.isNotEmpty && mounted) {
+      setState(() => _codigoController.text = codigo);
+      _focusNodeCodigo.nextFocus();
+    }
   }
 
   Future<void> _salvarContagem() async {
-    final itemCode  = _codigoController.text.trim();
-    final deposito  = _depositoController.text.trim();
-    final quantidade =
-        double.tryParse(_quantidadeController.text.replaceAll(',', '.'));
+    final itemCode = _codigoController.text.trim();
+    final deposito = _depositoController.text.trim();
+    final quantidade = double.tryParse(
+      _quantidadeController.text.replaceAll(',', '.'),
+    );
 
     if (itemCode.isEmpty) {
       await StoxAudio.play('sounds/error_beep.mp3', isError: true);
@@ -507,7 +432,8 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     if (quantidade == null || quantidade <= 0) {
       await StoxAudio.play('sounds/error_beep.mp3', isError: true);
       if (!mounted) return;
-      StoxSnackbar.erro(context, 'Informe uma quantidade válida e maior que zero.');
+      StoxSnackbar.erro(context,
+          'Informe uma quantidade válida e maior que zero.');
       return;
     }
 
@@ -533,12 +459,21 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       return;
     }
 
+    final String modo;
+    if (_isMultiplo) {
+      modo = 'multiple';
+    } else if (_isSimpleDoc) {
+      modo = 'single_doc';
+    } else {
+      modo = 'single';
+    }
+
     try {
       await DatabaseHelper.instance.inserirContagem(
         itemCode,
         quantidade,
         warehouseCode: deposito,
-        countingMode: _isMultiplo ? 'multiple' : 'single',
+        countingMode: modo,
         counterID: _isMultiplo ? _counterID : null,
         counterName: _isMultiplo ? _counterName : null,
       );
@@ -556,78 +491,89 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     }
   }
 
-  /// Limpa o documento selecionado e volta ao modo simples.
   Future<void> _sairModoEquipe() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('selected_doc_entry');
-    await prefs.remove('selected_doc_number');
+    await Future.wait([
+      prefs.remove('selected_doc_entry'),
+      prefs.remove('selected_doc_number'),
+      prefs.remove('selected_doc_type'),
+    ]);
     if (!mounted) return;
     setState(() {
       _isMultiplo = false;
+      _isSimpleDoc = false;
       _docEntry = null;
       _docNumber = null;
     });
-    StoxSnackbar.sucesso(context, 'Voltou ao modo simples.');
+    StoxSnackbar.sucesso(context, 'Voltou ao modo livre.');
   }
 
   // ── Edição ────────────────────────────────────────────────────────────────
 
   void _abrirEdicao(Map<String, dynamic> item) {
     HapticFeedback.selectionClick();
-    final editQtdController =
-        TextEditingController(text: item['quantidade'].toString());
-    final editDepController =
-        TextEditingController(text: item['warehouseCode'] ?? '01');
+    final editQtdController = TextEditingController(
+      text: item['quantidade'].toString(),
+    );
+    final editDepController = TextEditingController(
+      text: item['warehouseCode'] ?? '01',
+    );
 
     showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (dialogCtx, setDialogState) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
           title: Text('Editar: ${item['itemCode']}',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('Quantidade contada:',
-                  style:
-                      TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                  style: TextStyle(
+                      color: Colors.grey.shade600, fontSize: 13)),
               const SizedBox(height: 10),
               StoxCard(
-                child: Row(children: [
-                  IconButton(
-                    icon: const Icon(Icons.remove_circle_outline,
-                        color: Colors.red, size: 28),
-                    onPressed: () {
-                      _ajustarQuantidade(-1, controller: editQtdController);
-                      setDialogState(() {});
-                    },
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: editQtdController,
-                      textAlign: TextAlign.center,
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
-                      decoration: const InputDecoration(
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline,
+                          color: Colors.red, size: 28),
+                      onPressed: () {
+                        _ajustarQuantidade(-1,
+                            controller: editQtdController);
+                        setDialogState(() {});
+                      },
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: editQtdController,
+                        textAlign: TextAlign.center,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(
+                                decimal: true),
+                        decoration: const InputDecoration(
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
                           focusedBorder: InputBorder.none,
-                          filled: false),
-                      style: const TextStyle(
-                          fontSize: 22, fontWeight: FontWeight.bold),
+                          filled: false,
+                        ),
+                        style: const TextStyle(
+                            fontSize: 22, fontWeight: FontWeight.bold),
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add_circle_outline,
-                        color: Colors.green, size: 28),
-                    onPressed: () {
-                      _ajustarQuantidade(1, controller: editQtdController);
-                      setDialogState(() {});
-                    },
-                  ),
-                ]),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline,
+                          color: Colors.green, size: 28),
+                      onPressed: () {
+                        _ajustarQuantidade(1,
+                            controller: editQtdController);
+                        setDialogState(() {});
+                      },
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 20),
               StoxTextField(
@@ -654,35 +600,37 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
               ),
               onPressed: () async {
                 final novaQtd = double.tryParse(
-                        editQtdController.text.replaceAll(',', '.')) ??
+                      editQtdController.text.replaceAll(',', '.'),
+                    ) ??
                     0;
                 final novoDeposito = editDepController.text.trim();
 
                 if (novaQtd <= 0) {
-                  await StoxAudio.play('sounds/error_beep.mp3', isError: true);
+                  await StoxAudio.play('sounds/error_beep.mp3',
+                      isError: true);
                   if (!mounted) return;
                   StoxSnackbar.erro(context, 'Quantidade inválida.');
                   return;
                 }
                 if (novoDeposito.isEmpty) {
-                  await StoxAudio.play('sounds/error_beep.mp3', isError: true);
+                  await StoxAudio.play('sounds/error_beep.mp3',
+                      isError: true);
                   if (!mounted) return;
                   StoxSnackbar.aviso(context, 'Informe o depósito.');
                   return;
                 }
 
                 final navigator = Navigator.of(dialogCtx);
-
                 final db = await DatabaseHelper.instance.database;
                 await db.update(
                   'contagens',
                   {
-                    'quantidade':    novaQtd,
+                    'quantidade': novaQtd,
                     'warehouseCode': novoDeposito.toUpperCase(),
-                    'dataHora':      DateTime.now().toIso8601String(),
-                    'syncStatus':    0,
+                    'dataHora': DateTime.now().toIso8601String(),
+                    'syncStatus': 0,
                   },
-                  where:     'id = ?',
+                  where: 'id = ?',
                   whereArgs: [item['id']],
                 );
 
@@ -776,7 +724,8 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
             ),
           ),
         ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+        floatingActionButtonLocation:
+            FloatingActionButtonLocation.centerFloat,
         floatingActionButton: _modoSelecao && _selecionados.isNotEmpty
             ? StoxFab(
                 label:
@@ -790,16 +739,18 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
     );
   }
 
-  // ── Subwidgets do Build ───────────────────────────────────────────────────
-
   AppBar _buildAppBarNormal() => AppBar(
-        title: Text(_isMultiplo
-            ? 'Contagem em Equipe'
-            : 'Contagem Offline'),
+        title: Text(
+          _isMultiplo
+              ? 'Contagem em Equipe'
+              : _isSimpleDoc
+                  ? 'Contagem Simples'
+                  : 'Contagem Offline',
+        ),
         actions: [
-          if (_isMultiplo)
+          if (_isMultiplo || _isSimpleDoc)
             IconButton(
-              tooltip: 'Sair do modo equipe',
+              tooltip: 'Voltar ao modo livre',
               icon: Icon(Icons.exit_to_app_rounded,
                   color: Colors.orange.shade700),
               onPressed: _sairModoEquipe,
@@ -819,7 +770,8 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
           onPressed: _sairModoSelecao,
         ),
         title: Text(
-            '${_selecionados.length} selecionado${_selecionados.length != 1 ? 's' : ''}'),
+          '${_selecionados.length} selecionado${_selecionados.length != 1 ? 's' : ''}',
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.select_all_rounded),
@@ -841,27 +793,54 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              Icon(Icons.groups_rounded,
-                  color: Colors.purple.shade700, size: 22),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Contagem em Equipe — Doc #${_docNumber ?? _docEntry}',
-                  style: TextStyle(
-                    color: Colors.purple.shade700,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
+            Row(
+              children: [
+                Icon(Icons.groups_rounded,
+                    color: Colors.purple.shade700, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Contagem em Equipe — Doc #${_docNumber ?? _docEntry}',
+                    style: TextStyle(
+                      color: Colors.purple.shade700,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-              ),
-            ]),
+              ],
+            ),
             const SizedBox(height: 6),
             Text(
               'Contador: ${_counterName ?? 'Não identificado'}',
-              style: TextStyle(
-                color: Colors.purple.shade600,
-                fontSize: 13,
+              style: TextStyle(color: Colors.purple.shade600, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_isSimpleDoc) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.green.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.green.shade100),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.assignment_rounded,
+                color: Colors.green.shade700, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Contagem Simples — Doc #${_docNumber ?? _docEntry}',
+                style: TextStyle(
+                  color: Colors.green.shade700,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -876,100 +855,114 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.blue.shade100),
       ),
-      child: Row(children: [
-        Icon(Icons.wifi_off_rounded, color: theme.primaryColor),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            'Modo Offline: os dados ficam salvos localmente no aparelho.',
-            style: TextStyle(
-              color: theme.primaryColor,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
+      child: Row(
+        children: [
+          Icon(Icons.wifi_off_rounded, color: theme.primaryColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Modo Offline: os dados ficam salvos localmente no aparelho.',
+              style: TextStyle(
+                color: theme.primaryColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
-        ),
-      ]),
+        ],
+      ),
     );
   }
 
-  Widget _buildCabecalhoHistorico(ThemeData theme) => Row(children: [
-        Icon(
-          _modoSelecao ? Icons.checklist_rounded : Icons.history_rounded,
-          color: _modoSelecao ? theme.primaryColor : Colors.grey,
-        ),
-        const SizedBox(width: 8),
-        Text(
-          _modoSelecao
-              ? '${_selecionados.length} selecionado${_selecionados.length != 1 ? 's' : ''}'
-              : 'Histórico Recente',
-          style: TextStyle(
+  Widget _buildCabecalhoHistorico(ThemeData theme) => Row(
+        children: [
+          Icon(
+            _modoSelecao
+                ? Icons.checklist_rounded
+                : Icons.history_rounded,
+            color: _modoSelecao ? theme.primaryColor : Colors.grey,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _modoSelecao
+                ? '${_selecionados.length} selecionado${_selecionados.length != 1 ? 's' : ''}'
+                : 'Histórico Recente',
+            style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 16,
-              color: _modoSelecao ? theme.primaryColor : Colors.black87),
-        ),
-        const Spacer(),
-        if (!_modoSelecao)
-          Text('Segure para selecionar',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-        if (_modoSelecao)
-          TextButton(
-            onPressed: _selecionarTodos,
-            child: Text(
-              _selecionados.length == _contagens.length
-                  ? 'Desmarcar todos'
-                  : 'Selecionar todos',
-              style: TextStyle(
+              color: _modoSelecao ? theme.primaryColor : Colors.black87,
+            ),
+          ),
+          const Spacer(),
+          if (!_modoSelecao)
+            Text('Segure para selecionar',
+                style:
+                    TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+          if (_modoSelecao)
+            TextButton(
+              onPressed: _selecionarTodos,
+              child: Text(
+                _selecionados.length == _contagens.length
+                    ? 'Desmarcar todos'
+                    : 'Selecionar todos',
+                style: TextStyle(
                   color: theme.primaryColor,
                   fontWeight: FontWeight.w600,
-                  fontSize: 13),
+                  fontSize: 13,
+                ),
+              ),
             ),
-          ),
-      ]);
+        ],
+      );
 
   Widget _buildQuantidadeSelector() => StoxCard(
-        child: Row(children: [
-          InkWell(
-            onTap: () => _ajustarQuantidade(-1),
-            borderRadius: const BorderRadius.only(
+        child: Row(
+          children: [
+            InkWell(
+              onTap: () => _ajustarQuantidade(-1),
+              borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(12),
-                bottomLeft: Radius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Icon(Icons.remove_rounded,
-                  color: Colors.red.shade600, size: 28),
-            ),
-          ),
-          Expanded(
-            child: TextField(
-              controller: _quantidadeController,
-              textAlign: TextAlign.center,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              onTap: () => HapticFeedback.selectionClick(),
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                fillColor: Colors.transparent,
-                filled: false,
-                contentPadding: EdgeInsets.zero,
+                bottomLeft: Radius.circular(12),
               ),
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Icon(Icons.remove_rounded,
+                    color: Colors.red.shade600, size: 28),
+              ),
             ),
-          ),
-          InkWell(
-            onTap: () => _ajustarQuantidade(1),
-            borderRadius: const BorderRadius.only(
+            Expanded(
+              child: TextField(
+                controller: _quantidadeController,
+                textAlign: TextAlign.center,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                onTap: () => HapticFeedback.selectionClick(),
+                decoration: const InputDecoration(
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  fillColor: Colors.transparent,
+                  filled: false,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                style: const TextStyle(
+                    fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+            ),
+            InkWell(
+              onTap: () => _ajustarQuantidade(1),
+              borderRadius: const BorderRadius.only(
                 topRight: Radius.circular(12),
-                bottomRight: Radius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Icon(Icons.add_rounded,
-                  color: Colors.green.shade600, size: 28),
+                bottomRight: Radius.circular(12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Icon(Icons.add_rounded,
+                    color: Colors.green.shade600, size: 28),
+              ),
             ),
-          ),
-        ]),
+          ],
+        ),
       );
 
   Widget _buildListaContagens() {
@@ -988,12 +981,14 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
       return StoxCard(
         padding: const EdgeInsets.all(32),
         child: Center(
-          child: Column(children: [
-            Icon(Icons.inbox_rounded, size: 48, color: Colors.grey.shade400),
-            const SizedBox(height: 12),
-            Text('Nenhuma contagem registrada.',
-                style: TextStyle(color: Colors.grey.shade600)),
-          ]),
+          child: Column(
+            children: [
+              Icon(Icons.inbox_rounded, size: 48, color: Colors.grey.shade400),
+              const SizedBox(height: 12),
+              Text('Nenhuma contagem registrada.',
+                  style: TextStyle(color: Colors.grey.shade600)),
+            ],
+          ),
         ),
       );
     }
@@ -1006,11 +1001,11 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
         physics: const NeverScrollableScrollPhysics(),
         itemCount: _contagens.length,
         separatorBuilder: (_, _) => const SizedBox(height: 8),
-        itemBuilder: (context, index) {
-          final item        = _contagens[index];
-          final syncStatus  = item['syncStatus'] ?? 0;
-          final deposito    = item['warehouseCode'] ?? '01';
-          final id          = item['id'] as int;
+        itemBuilder: (_, index) {
+          final item = _contagens[index];
+          final syncStatus = item['syncStatus'] ?? 0;
+          final deposito = item['warehouseCode'] ?? '01';
+          final id = item['id'] as int;
           final selecionado = _selecionados.contains(id);
 
           return AnimatedContainer(
@@ -1018,7 +1013,9 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: selecionado ? Colors.red.shade400 : Colors.grey.shade300,
+                color: selecionado
+                    ? Colors.red.shade400
+                    : Colors.grey.shade300,
                 width: selecionado ? 2 : 1,
               ),
               color: selecionado ? Colors.red.shade50 : Colors.white,
@@ -1042,17 +1039,17 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                         syncStatus == 1
                             ? Icons.cloud_done_rounded
                             : Icons.cloud_upload_rounded,
-                        color:
-                            syncStatus == 1 ? Colors.green : Colors.orange,
+                        color: syncStatus == 1 ? Colors.green : Colors.orange,
                         size: 20,
                       ),
                     ),
               title: Text(
                 item['itemCode'],
                 style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: selecionado ? Colors.red.shade700 : Colors.black87),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: selecionado ? Colors.red.shade700 : Colors.black87,
+                ),
               ),
               subtitle: Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -1061,7 +1058,8 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                       ? 'Qtd: ${item['quantidade']}  •  Dep: $deposito  •  ${item['counterName']}'
                       : 'Qtd: ${item['quantidade']}  •  Dep: $deposito',
                   style: TextStyle(
-                      color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                      color: Colors.grey.shade700,
+                      fontWeight: FontWeight.w500),
                 ),
               ),
               trailing: _modoSelecao
@@ -1071,8 +1069,9 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
                           color: Theme.of(context).primaryColor),
                       onPressed: () => _abrirEdicao(item),
                     ),
-              onTap:      _modoSelecao ? () => _toggleSelecao(id) : null,
-              onLongPress: _modoSelecao ? null : () => _entrarModoSelecao(id),
+              onTap: _modoSelecao ? () => _toggleSelecao(id) : null,
+              onLongPress:
+                  _modoSelecao ? null : () => _entrarModoSelecao(id),
             ),
           );
         },
@@ -1081,13 +1080,12 @@ class _ContadorOfflinePageState extends State<ContadorOfflinePage> {
   }
 }
 
-// ── Diálogo de confirmação de exclusão ───────────────────────────────────────
+// ── Diálogo de confirmação de exclusão ──────────────────────────────────────
 
-/// Exige digitação de "EXCLUIR" quando a seleção tem 3 ou mais itens.
 class _DialogoConfirmacaoExclusao extends StatefulWidget {
-  final int                         quantidade;
-  final bool                        isTodosItens;
-  final List<Map<String, dynamic>>  itens;
+  final int quantidade;
+  final bool isTodosItens;
+  final List<Map<String, dynamic>> itens;
 
   const _DialogoConfirmacaoExclusao({
     required this.quantidade,
@@ -1103,7 +1101,7 @@ class _DialogoConfirmacaoExclusao extends StatefulWidget {
 class _DialogoConfirmacaoExclusaoState
     extends State<_DialogoConfirmacaoExclusao> {
   final _confirmController = TextEditingController();
-  bool  _confirmacaoValida = false;
+  bool _confirmacaoValida = false;
 
   bool get _exigeDigitacao => widget.quantidade >= 3;
 
@@ -1131,27 +1129,32 @@ class _DialogoConfirmacaoExclusaoState
     final habilitado = !_exigeDigitacao || _confirmacaoValida;
 
     return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-      title: Row(children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
               color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(8)),
-          child: Icon(Icons.delete_forever_rounded,
-              color: Colors.red.shade700, size: 24),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            widget.isTodosItens
-                ? 'Excluir toda a contagem'
-                : 'Excluir ${widget.quantidade} ${widget.quantidade == 1 ? 'item' : 'itens'}',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.delete_forever_rounded,
+                color: Colors.red.shade700, size: 24),
           ),
-        ),
-      ]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              widget.isTodosItens
+                  ? 'Excluir toda a contagem'
+                  : 'Excluir ${widget.quantidade} ${widget.quantidade == 1 ? 'item' : 'itens'}',
+              style: const TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1164,22 +1167,28 @@ class _DialogoConfirmacaoExclusaoState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ...widget.itens.take(5).map((item) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(item['itemCode'],
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600, fontSize: 13)),
-                            Text(
-                              'Qtd: ${item['quantidade']}  •  Dep: ${item['warehouseCode'] ?? '01'}',
-                              style: TextStyle(
-                                  fontSize: 12, color: Colors.grey.shade600),
-                            ),
-                          ],
+                  ...widget.itens.take(5).map(
+                        (item) => Padding(
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(item['itemCode'],
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13)),
+                              Text(
+                                'Qtd: ${item['quantidade']}  •  Dep: ${item['warehouseCode'] ?? '01'}',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
                         ),
-                      )),
+                      ),
                   if (widget.itens.length > 5) ...[
                     const SizedBox(height: 4),
                     Text('+ ${widget.itens.length - 5} itens...',
@@ -1252,16 +1261,16 @@ class _DialogoConfirmacaoExclusaoState
                 }
               : null,
           icon: const Icon(Icons.delete_rounded, size: 16),
-          label: Text(
-            'EXCLUIR ${widget.quantidade}',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-          ),
+          label: Text('EXCLUIR ${widget.quantidade}',
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 13)),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.red.shade600,
             foregroundColor: Colors.white,
             disabledBackgroundColor: Colors.grey.shade300,
             disabledForegroundColor: Colors.grey.shade500,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),

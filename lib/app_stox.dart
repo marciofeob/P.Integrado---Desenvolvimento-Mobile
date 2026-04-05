@@ -6,8 +6,8 @@ import 'src/widgets/stox_theme.dart';
 /// Raiz da aplicação STOX.
 ///
 /// Configura o [MaterialApp] com o tema SAP Fiori ([StoxTheme.lightTheme]),
-/// define [LoginPage] como rota inicial e aplica transição padrão
-/// (slide 4% + fade, 300ms) em todas as navegações via [StoxApp.transicaoPadrao].
+/// define [LoginPage] como rota inicial e disponibiliza [transicaoPadrao]
+/// para transições consistentes em toda a navegação.
 class StoxApp extends StatelessWidget {
   const StoxApp({super.key});
 
@@ -25,19 +25,21 @@ class StoxApp extends StatelessWidget {
 
   /// Cria um [PageRouteBuilder] com a transição padrão do STOX.
   ///
-  /// Slide sutil da direita (4%) combinado com fade.
-  /// Duração: 300ms com [Curves.easeOut].
+  /// Combina slide sutil da direita (4%) com fade-in.
+  /// - Duração de entrada: 300ms
+  /// - Duração de saída: 250ms
+  /// - Curva: [Curves.easeOut]
   ///
-  /// Usar em qualquer `Navigator.push` para manter consistência:
+  /// Usar em qualquer navegação para manter consistência visual:
   /// ```dart
   /// Navigator.push(context, StoxApp.transicaoPadrao(MinhaPage()));
   /// ```
   static Route<T> transicaoPadrao<T>(Widget pagina) {
     return PageRouteBuilder<T>(
-      pageBuilder: (context, animation, secondaryAnimation) => pagina,
+      pageBuilder: (_, _, _) => pagina,
       transitionDuration: const Duration(milliseconds: 300),
       reverseTransitionDuration: const Duration(milliseconds: 250),
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      transitionsBuilder: (_, animation, _, child) {
         final curva = CurvedAnimation(
           parent: animation,
           curve: Curves.easeOut,

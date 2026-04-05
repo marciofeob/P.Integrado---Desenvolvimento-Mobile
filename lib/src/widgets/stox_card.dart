@@ -1,10 +1,23 @@
 import 'package:flutter/material.dart';
 
+/// Raio de borda padrão dos cards STOX (12px).
+const _kCardRadius = BorderRadius.all(Radius.circular(12));
+
+// ── StoxCard ────────────────────────────────────────────────────────────────
+
 /// Card com borda suave — base reutilizável para listas e seções.
 ///
 /// Suporta [onTap] com ripple effect e [padding] interno opcional.
 /// Envolve o [InkWell] com [Material] para garantir o splash em
 /// todos os dispositivos.
+///
+/// ```dart
+/// StoxCard(
+///   padding: const EdgeInsets.all(16),
+///   onTap: _abrirDetalhe,
+///   child: Text('Conteúdo'),
+/// )
+/// ```
 class StoxCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? margin;
@@ -23,16 +36,15 @@ class StoxCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget content = padding != null
-        ? Padding(padding: padding!, child: child)
-        : child;
+    Widget content =
+        padding != null ? Padding(padding: padding!, child: child) : child;
 
     if (onTap != null) {
       content = Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: _kCardRadius,
           child: content,
         ),
       );
@@ -42,20 +54,26 @@ class StoxCard extends StatelessWidget {
       margin: margin ?? const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: _kCardRadius,
         border: Border.all(color: borderColor ?? Colors.grey.shade200),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: _kCardRadius,
         child: content,
       ),
     );
   }
 }
 
+// ── StoxItemHeaderCard ──────────────────────────────────────────────────────
+
 /// Card de cabeçalho colorido exibido na consulta de item.
 ///
 /// Mostra código, nome, quantidade em estoque e [StoxEstoqueBarra].
+/// A cor da quantidade muda conforme o nível de estoque:
+/// - Verde: acima do mínimo
+/// - Laranja: abaixo do mínimo
+/// - Branco translúcido: zerado
 class StoxItemHeaderCard extends StatelessWidget {
   final String itemCode;
   final String itemName;
@@ -98,15 +116,19 @@ class StoxItemHeaderCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Info do item ──
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(itemCode,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold)),
+                    Text(
+                      itemCode,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 6),
                     Text(itemName,
                         style: const TextStyle(color: Colors.white70)),
@@ -114,27 +136,38 @@ class StoxItemHeaderCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 16),
+
+              // ── Quantidade ──
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(_qtdFormatada,
-                      style: TextStyle(
-                          color: _corQuantidade,
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          height: 1.0)),
-                  Text(unidadeMedida,
-                      style: TextStyle(
-                          color: _corQuantidade.withAlpha(200),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500)),
-                  const Text('em estoque',
-                      style:
-                          TextStyle(color: Colors.white38, fontSize: 10)),
+                  Text(
+                    _qtdFormatada,
+                    style: TextStyle(
+                      color: _corQuantidade,
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      height: 1.0,
+                    ),
+                  ),
+                  Text(
+                    unidadeMedida,
+                    style: TextStyle(
+                      color: _corQuantidade.withAlpha(200),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const Text(
+                    'em estoque',
+                    style: TextStyle(color: Colors.white38, fontSize: 10),
+                  ),
                 ],
               ),
             ],
           ),
+
+          // ── Barra de estoque ──
           if (estoqueMinimo > 0 || quantidadeEmEstoque > 0) ...[
             const SizedBox(height: 16),
             StoxEstoqueBarra(
@@ -149,9 +182,12 @@ class StoxItemHeaderCard extends StatelessWidget {
   }
 }
 
+// ── StoxEstoqueBarra ────────────────────────────────────────────────────────
+
 /// Barra de progresso colorida de estoque.
 ///
 /// Verde = acima do mínimo, laranja = abaixo do mínimo, branco = zerado.
+/// A referência de 100% é o [maximo], ou `minimo × 3`, ou `atual × 1.5`.
 class StoxEstoqueBarra extends StatelessWidget {
   final num atual;
   final num minimo;
@@ -193,12 +229,12 @@ class StoxEstoqueBarra extends StatelessWidget {
           children: [
             if (minimo > 0)
               Text('Mín: $minimo',
-                  style: const TextStyle(
-                      color: Colors.white54, fontSize: 10)),
+                  style:
+                      const TextStyle(color: Colors.white54, fontSize: 10)),
             if (maximo > 0)
               Text('Máx: $maximo',
-                  style: const TextStyle(
-                      color: Colors.white54, fontSize: 10)),
+                  style:
+                      const TextStyle(color: Colors.white54, fontSize: 10)),
           ],
         ),
       ],
@@ -206,9 +242,12 @@ class StoxEstoqueBarra extends StatelessWidget {
   }
 }
 
+// ── StoxSectionCard ─────────────────────────────────────────────────────────
+
 /// Card de seção com título e linhas de detalhe.
 ///
 /// Filtra automaticamente as [StoxDetailRow] com [value] nulo ou vazio.
+/// Exibe "Sem informações disponíveis." quando todas as linhas são vazias.
 class StoxSectionCard extends StatelessWidget {
   final String titulo;
   final List<StoxDetailRow> linhas;
@@ -221,32 +260,33 @@ class StoxSectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visiveis = linhas
-        .where((l) => l.value != null && l.value!.isNotEmpty)
-        .toList();
+    final visiveis =
+        linhas.where((l) => l.value != null && l.value!.isNotEmpty).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 20, bottom: 8),
-          child: Text(titulo,
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 15)),
+          child: Text(
+            titulo,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          ),
         ),
         if (visiveis.isEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Text('Sem informações disponíveis.',
-                style: TextStyle(
-                    color: Colors.grey.shade500, fontSize: 13)),
+            child: Text(
+              'Sem informações disponíveis.',
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+            ),
           )
         else
           Container(
             margin: const EdgeInsets.only(bottom: 4),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: _kCardRadius,
               border: Border.all(color: Colors.grey.shade200),
             ),
             child: Column(
@@ -255,10 +295,11 @@ class StoxSectionCard extends StatelessWidget {
                   visiveis[i],
                   if (i < visiveis.length - 1)
                     Divider(
-                        height: 1,
-                        indent: 16,
-                        endIndent: 16,
-                        color: Colors.grey.shade100),
+                      height: 1,
+                      indent: 16,
+                      endIndent: 16,
+                      color: Colors.grey.shade100,
+                    ),
                 ],
               ],
             ),
@@ -268,6 +309,8 @@ class StoxSectionCard extends StatelessWidget {
   }
 }
 
+// ── StoxDetailRow ───────────────────────────────────────────────────────────
+
 /// Linha de detalhe label/valor usada dentro de [StoxSectionCard].
 ///
 /// Retorna [SizedBox.shrink] quando [value] é nulo ou vazio —
@@ -276,7 +319,11 @@ class StoxSectionCard extends StatelessWidget {
 class StoxDetailRow extends StatelessWidget {
   final String label;
   final String? value;
+
+  /// Exibe o valor em vermelho (item bloqueado, estoque crítico).
   final bool isAlert;
+
+  /// Exibe o valor maior e na cor primária (totais, preços).
   final bool destaque;
 
   const StoxDetailRow(
@@ -290,10 +337,13 @@ class StoxDetailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (value == null || value!.isEmpty) return const SizedBox.shrink();
+
     return ListTile(
       dense: true,
-      title: Text(label,
-          style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+      title: Text(
+        label,
+        style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+      ),
       trailing: Text(
         value!,
         style: TextStyle(
@@ -310,7 +360,12 @@ class StoxDetailRow extends StatelessWidget {
   }
 }
 
+// ── StoxSummaryCard ─────────────────────────────────────────────────────────
+
 /// Card de resumo do painel home com total de itens e botão de sincronização.
+///
+/// O botão de sincronização é desabilitado quando [carregando] é `true`
+/// ou quando [totalItens] é zero (nada para enviar).
 class StoxSummaryCard extends StatelessWidget {
   final int totalItens;
   final bool carregando;
@@ -334,26 +389,35 @@ class StoxSummaryCard extends StatelessWidget {
             const BorderRadius.vertical(bottom: Radius.circular(32)),
         boxShadow: [
           BoxShadow(
-              color: Theme.of(context).primaryColor.withAlpha(77),
-              blurRadius: 12,
-              offset: const Offset(0, 6)),
+            color: Theme.of(context).primaryColor.withAlpha(77),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
         ],
       ),
       child: Column(
         children: [
-          const Text('Itens aguardando envio',
-              style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500)),
+          const Text(
+            'Itens aguardando envio',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text('$totalItens',
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 56,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: -1)),
+          Text(
+            '$totalItens',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 56,
+              fontWeight: FontWeight.bold,
+              letterSpacing: -1,
+            ),
+          ),
           const SizedBox(height: 24),
+
+          // ── Botão sincronizar ──
           SizedBox(
             width: double.infinity,
             height: 54,
@@ -365,11 +429,15 @@ class StoxSummaryCard extends StatelessWidget {
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2.5, color: Colors.white),
+                        strokeWidth: 2.5,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.cloud_upload_rounded),
-              label: const Text('SINCRONIZAR AGORA',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              label: const Text(
+                'SINCRONIZAR AGORA',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green.shade600,
                 foregroundColor: Colors.white,
@@ -377,7 +445,8 @@ class StoxSummaryCard extends StatelessWidget {
                 disabledForegroundColor: Colors.white70,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
             ),
           ),

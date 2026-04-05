@@ -6,14 +6,18 @@ import 'package:share_plus/share_plus.dart';
 
 /// Serviço de exportação de contagens para CSV.
 ///
-/// Gera um arquivo CSV compatível com Excel PT-BR (delimitador `;`,
-/// encoding UTF-8 com BOM) e o compartilha via [SharePlus].
+/// Gera um arquivo CSV compatível com Excel PT-BR:
+/// - Delimitador: `;` (ponto e vírgula)
+/// - Decimal: `,` (vírgula)
+/// - Encoding: UTF-8 com BOM
+///
+/// O arquivo é compartilhado via [SharePlus] (e-mail, Drive, WhatsApp, etc).
 class ExportService {
   ExportService._();
 
   // ── CSV ───────────────────────────────────────────────────────────────────
 
-  /// Escapa um campo: envolve em aspas duplas se contiver `;`, `"` ou `\n`.
+  /// Escapa um campo CSV: envolve em aspas duplas se contiver `;`, `"` ou `\n`.
   static String _escapar(String valor) {
     if (valor.contains(';') || valor.contains('"') || valor.contains('\n')) {
       return '"${valor.replaceAll('"', '""')}"';
@@ -21,11 +25,13 @@ class ExportService {
     return valor;
   }
 
+  /// Converte uma matriz de strings em CSV com delimitador `;`.
   static String _toCsv(List<List<String>> linhas) =>
       linhas.map((l) => l.map(_escapar).join(';')).join('\n');
 
   // ── Formatação ────────────────────────────────────────────────────────────
 
+  /// Formata ISO 8601 para o padrão brasileiro `dd/MM/yyyy HH:mm:ss`.
   static String _formatarData(String raw) {
     if (raw.length < 19) return raw;
     try {
@@ -41,11 +47,22 @@ class ExportService {
     }
   }
 
+  /// Converte código numérico de status em rótulo legível.
   static String _formatarStatus(int status) => switch (status) {
         1 => 'Sincronizado',
         2 => 'Erro no Envio',
         _ => 'Pendente',
       };
+
+  /// Gera o sufixo de timestamp para o nome do arquivo (yyyyMMdd_HHmm).
+  static String _tagTimestamp() {
+    final agora = DateTime.now();
+    return '${agora.year}'
+        '${agora.month.toString().padLeft(2, '0')}'
+        '${agora.day.toString().padLeft(2, '0')}_'
+        '${agora.hour.toString().padLeft(2, '0')}'
+        '${agora.minute.toString().padLeft(2, '0')}';
+  }
 
   // ── Exportação ────────────────────────────────────────────────────────────
 
@@ -53,41 +70,40 @@ class ExportService {
   ///
   /// Retorna `true` se o usuário efetivamente compartilhou o arquivo,
   /// ou `false` se cancelou/fechou o diálogo de compartilhamento.
-  /// Lança exceção em caso de falha — o chamador deve tratar e exibir feedback.
+  ///
+  /// Lança exceção em caso de falha de I/O — o chamador deve tratar
+  /// e exibir feedback ao usuário.
   static Future<bool> exportarContagensParaCSV(
     List<Map<String, dynamic>> contagens,
   ) async {
     try {
       final linhas = <List<String>>[
+        // Header
         ['Código do Item', 'Depósito', 'Quantidade', 'Data e Hora', 'Status'],
+
+        // Dados
         ...contagens.map((c) => [
-              c['itemCode']?.toString()                        ?? '',
-              c['warehouseCode']?.toString()                   ?? '01',
+              c['itemCode']?.toString() ?? '',
+              c['warehouseCode']?.toString() ?? '01',
               c['quantidade']?.toString().replaceAll('.', ',') ?? '0,0',
-              _formatarData(c['dataHora']?.toString()          ?? ''),
-              _formatarStatus(c['syncStatus'] as int?          ?? 0),
+              _formatarData(c['dataHora']?.toString() ?? ''),
+              _formatarStatus(c['syncStatus'] as int? ?? 0),
             ]),
       ];
 
       // BOM UTF-8 garante que o Excel reconheça acentos automaticamente
-      const bom      = '\uFEFF';
+      const bom = '\uFEFF';
       final conteudo = bom + _toCsv(linhas);
 
-      final dir   = await getTemporaryDirectory();
-      final agora = DateTime.now();
-      final tag   = '${agora.year}'
-          '${agora.month.toString().padLeft(2, '0')}'
-          '${agora.day.toString().padLeft(2, '0')}_'
-          '${agora.hour.toString().padLeft(2, '0')}'
-          '${agora.minute.toString().padLeft(2, '0')}';
-
+      final dir = await getTemporaryDirectory();
+      final tag = _tagTimestamp();
       final arquivo = File('${dir.path}/Relatorio_STOX_$tag.csv');
       await arquivo.writeAsString(conteudo);
 
       final resultado = await SharePlus.instance.share(
         ShareParams(
           files: [XFile(arquivo.path, mimeType: 'text/csv')],
-          text:    'Relatório de Contagem Offline - STOX',
+          text: 'Relatório de Contagem Offline - STOX',
           subject: 'Relatório STOX - $tag',
         ),
       );

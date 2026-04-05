@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 
+// ── StoxLoadingSpinner ──────────────────────────────────────────────────────
+
 /// Spinner centralizado com mensagem opcional.
 ///
-/// Usar em telas que aguardam uma operação pontual (ex.: login).
+/// Usar em telas que aguardam uma operação pontual (ex.: login, busca).
 /// Para carregamentos de lista, prefira [StoxSkeletonList].
+///
+/// ```dart
+/// if (_carregando) const StoxLoadingSpinner(mensagem: 'Buscando no SAP...')
+/// ```
 class StoxLoadingSpinner extends StatelessWidget {
   final String? mensagem;
 
@@ -40,6 +46,8 @@ class StoxLoadingSpinner extends StatelessWidget {
   }
 }
 
+// ── StoxLinearLoading ───────────────────────────────────────────────────────
+
 /// Barra fina de progresso indeterminado no topo da tela.
 ///
 /// Usar dentro de um [Column] acima do conteúdo durante
@@ -59,11 +67,14 @@ class StoxLinearLoading extends StatelessWidget {
       borderRadius: BorderRadius.circular(2),
       child: LinearProgressIndicator(
         minHeight: 3,
-        backgroundColor: Theme.of(context).colorScheme.primary.withAlpha(30),
+        backgroundColor:
+            Theme.of(context).colorScheme.primary.withAlpha(30),
       ),
     );
   }
 }
+
+// ── StoxSkeletonCard ────────────────────────────────────────────────────────
 
 /// Card fantasma com animação de pulso (shimmer sem dependência externa).
 ///
@@ -115,47 +126,15 @@ class _StoxSkeletonCardState extends State<StoxSkeletonCard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Linha de título ──
-            Container(
-              width: 180,
-              height: 14,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
+            _SkeletonLine(width: 180, height: 14),
             const SizedBox(height: 12),
-            // ── Linha de subtítulo ──
-            Container(
-              width: 120,
-              height: 12,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
+            _SkeletonLine(width: 120, height: 12),
             const SizedBox(height: 10),
-            // ── Linha de detalhe ──
             Row(
               children: [
-                Expanded(
-                  child: Container(
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                ),
+                Expanded(child: _SkeletonLine(height: 10)),
                 const SizedBox(width: 48),
-                Container(
-                  width: 60,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
+                _SkeletonLine(width: 60, height: 10),
               ],
             ),
           ],
@@ -164,6 +143,28 @@ class _StoxSkeletonCardState extends State<StoxSkeletonCard>
     );
   }
 }
+
+/// Linha retangular de placeholder para skeleton loading.
+class _SkeletonLine extends StatelessWidget {
+  final double? width;
+  final double height;
+
+  const _SkeletonLine({this.width, required this.height});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(4),
+      ),
+    );
+  }
+}
+
+// ── StoxSkeletonList ────────────────────────────────────────────────────────
 
 /// Lista de [StoxSkeletonCard] para placeholder no primeiro carregamento.
 ///

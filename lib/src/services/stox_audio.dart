@@ -1,6 +1,6 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
 
 /// Serviço centralizado de feedback sonoro e tátil do STOX.
@@ -11,6 +11,14 @@ import 'package:vibration/vibration.dart';
 ///
 /// Vibração e áudio operam em blocos independentes: uma falha na
 /// vibração não impede o som, e vice-versa.
+///
+/// Padrões de vibração por tipo de evento:
+/// | Evento          | Som                     | Vibração                    |
+/// |-----------------|-------------------------|-----------------------------|
+/// | Sucesso / scan  | `sounds/check.mp3`      | `duration: 150ms`           |
+/// | Beep simples    | `sounds/beep.mp3`       | `duration: 150ms`           |
+/// | Aviso / duplicata | `sounds/error_beep.mp3` | `[0, 200, 100, 300]`     |
+/// | Falha grave     | `sounds/fail.mp3`       | `[0, 400, 100, 400]`       |
 ///
 /// Uso:
 /// ```dart
@@ -24,8 +32,11 @@ class StoxAudio {
   /// Toca um som de asset e dispara vibração de acordo com o tipo de evento.
   ///
   /// - [asset]: caminho relativo ao diretório `assets/` (ex: `sounds/check.mp3`)
-  /// - [isError]: padrão de vibração para avisos/duplicatas
-  /// - [isFail]: padrão de vibração para falhas graves
+  /// - [isError]: padrão de vibração para avisos/duplicatas (pulso duplo)
+  /// - [isFail]: padrão de vibração para falhas graves (pulso longo duplo)
+  ///
+  /// Se o dispositivo não suportar vibração nativa, usa [HapticFeedback]
+  /// como fallback (taptic engine do sistema).
   static Future<void> play(
     String asset, {
     bool isError = false,
@@ -43,9 +54,12 @@ class StoxAudio {
           Vibration.vibrate(duration: 150);
         }
       } else {
-        (isFail || isError)
-            ? HapticFeedback.vibrate()
-            : HapticFeedback.lightImpact();
+        // Fallback para dispositivos sem motor de vibração
+        if (isFail || isError) {
+          HapticFeedback.vibrate();
+        } else {
+          HapticFeedback.lightImpact();
+        }
       }
     } catch (e) {
       if (kDebugMode) debugPrint('StoxAudio.play (vibração): $e');

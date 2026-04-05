@@ -4,6 +4,18 @@
 /// ```dart
 /// import '../widgets/widgets.dart';
 /// ```
+///
+/// Widgets disponíveis:
+/// - Botões: [StoxButton], [StoxOutlinedButton], [StoxDestructiveButton],
+///   [StoxTextButton], [StoxFab]
+/// - Cards: [StoxCard], [StoxItemHeaderCard], [StoxEstoqueBarra],
+///   [StoxSectionCard], [StoxDetailRow], [StoxSummaryCard]
+/// - Diálogos: [StoxDialog], [StoxStatusChip], [StoxBadge]
+/// - Snackbars: [StoxSnackbar]
+/// - Campos: [StoxTextField], [StoxPasswordField], [StoxSearchBar]
+/// - Loading: [StoxLoadingSpinner], [StoxLinearLoading],
+///   [StoxSkeletonCard], [StoxSkeletonList]
+/// - Tema: [StoxTheme]
 library;
 
 export 'stox_button.dart';

@@ -1,18 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app_stox.dart';
 import '../services/sap_service.dart';
 import '../widgets/widgets.dart';
 import 'api_config_page.dart';
-import 'home_page.dart';
 import 'contador_offline_page.dart';
+import 'home_page.dart';
+
+/// Versão exibida no rodapé das telas de entrada.
+///
+/// Atualizar aqui ao publicar novas releases — reflete em [LoginPage]
+/// e [ApiConfigPage].
+const kStoxVersao = 'STOX v1.0.0 — Grupo JCN';
 
 /// Tela de autenticação do STOX.
 ///
 /// Valida as credenciais contra o SAP Business One via [SapService.login].
-/// Oferece acesso ao modo offline sem autenticação.
+/// Em caso de sucesso, navega para [HomePage] com `pushReplacement`.
+///
+/// Também oferece:
+/// - Acesso ao modo offline sem autenticação ([ContadorOfflinePage])
+/// - Acesso às configurações da API ([ApiConfigPage])
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -22,7 +33,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _usuarioController = TextEditingController();
-  final _senhaController   = TextEditingController();
+  final _senhaController = TextEditingController();
 
   bool _carregando = false;
 
@@ -35,6 +46,7 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── Ações ─────────────────────────────────────────────────────────────────
 
+  /// Limpa os campos de usuário e senha.
   void _limparCampos() {
     HapticFeedback.selectionClick();
     setState(() {
@@ -43,11 +55,13 @@ class _LoginPageState extends State<LoginPage> {
     });
   }
 
+  /// Valida os campos, autentica no SAP e navega para [HomePage].
   Future<void> _login() async {
     FocusScope.of(context).unfocus();
 
-    final prefs     = await SharedPreferences.getInstance();
-    final sapUrl    = prefs.getString('sap_url')     ?? '';
+    // ── Validação da configuração SAP ──
+    final prefs = await SharedPreferences.getInstance();
+    final sapUrl = prefs.getString('sap_url') ?? '';
     final companyDb = prefs.getString('sap_company') ?? '';
 
     if (!mounted) return;
@@ -57,16 +71,18 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
+    // ── Validação dos campos ──
     if (_usuarioController.text.isEmpty || _senhaController.text.isEmpty) {
       StoxSnackbar.aviso(context, 'Usuário e senha são obrigatórios.');
       return;
     }
 
+    // ── Autenticação ──
     setState(() => _carregando = true);
     try {
       final sucesso = await SapService.login(
         usuario: _usuarioController.text.trim(),
-        senha:   _senhaController.text,
+        senha: _senhaController.text,
       );
 
       if (!mounted) return;
@@ -98,109 +114,124 @@ class _LoginPageState extends State<LoginPage> {
 
     return Scaffold(
       body: SafeArea(
-        child: LayoutBuilder(builder: (_, constraints) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: IntrinsicHeight(
-                child: Column(
-                  mainAxisSize: MainAxisSize.max,
-                  children: [
-                    SizedBox(height: size.height * 0.08),
+        child: LayoutBuilder(
+          builder: (_, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: ConstrainedBox(
+                constraints:
+                    BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Column(
+                    children: [
+                      SizedBox(height: size.height * 0.08),
 
-                    Image.asset('assets/images/Logo_colorida.png', height: 80),
-
-                    const SizedBox(height: 24),
-
-                    const Text(
-                      'Contagem de Estoque',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
+                      // ── Logo ──
+                      Image.asset(
+                        'assets/images/Logo_colorida.png',
+                        height: 80,
                       ),
-                    ),
 
-                    const SizedBox(height: 8),
+                      const SizedBox(height: 24),
 
-                    Text(
-                      'Informe seu usuário e senha do SAP',
-                      style: TextStyle(color: Colors.grey.shade600),
-                    ),
-
-                    const SizedBox(height: 40),
-
-                    StoxTextField(
-                      controller:      _usuarioController,
-                      labelText:       'Usuário',
-                      prefixIcon:      Icons.person_outline,
-                      textInputAction: TextInputAction.next,
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    StoxPasswordField(
-                      controller:      _senhaController,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted:     (_) => _login(),
-                    ),
-
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: StoxTextButton(
-                        label:     'Limpar',
-                        onPressed: _limparCampos,
+                      const Text(
+                        'Contagem de Estoque',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
 
-                    const SizedBox(height: 20),
+                      const SizedBox(height: 8),
 
-                    StoxButton(
-                      label:     'ENTRAR E SINCRONIZAR',
-                      loading:   _carregando,
-                      onPressed: _login,
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    StoxOutlinedButton(
-                      label: 'MODO CONTADOR OFFLINE',
-                      icon:  Icons.qr_code_scanner,
-                      onPressed: () => Navigator.push(
-                        context,
-                        StoxApp.transicaoPadrao(const ContadorOfflinePage()),
+                      Text(
+                        'Informe seu usuário e senha do SAP',
+                        style: TextStyle(color: Colors.grey.shade600),
                       ),
-                    ),
 
-                    const Spacer(),
+                      const SizedBox(height: 40),
 
-                    StoxTextButton(
-                      label: 'Configurações da API',
-                      icon:  Icons.settings,
-                      onPressed: () => Navigator.push(
-                        context,
-                        StoxApp.transicaoPadrao(const ApiConfigPage()),
+                      // ── Formulário ──
+                      StoxTextField(
+                        controller: _usuarioController,
+                        labelText: 'Usuário',
+                        prefixIcon: Icons.person_outline,
+                        textInputAction: TextInputAction.next,
                       ),
-                    ),
 
-                    const SizedBox(height: 24),
+                      const SizedBox(height: 20),
 
-                    Text(
-                      'STOX v1.0.0 — Grupo JCN',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey.shade400,
+                      StoxPasswordField(
+                        controller: _senhaController,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _login(),
                       ),
-                    ),
 
-                    SizedBox(height: bottomPadding > 0 ? bottomPadding + 16 : 24),
-                  ],
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: StoxTextButton(
+                          label: 'Limpar',
+                          onPressed: _limparCampos,
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // ── Ações primárias ──
+                      StoxButton(
+                        label: 'ENTRAR E SINCRONIZAR',
+                        loading: _carregando,
+                        onPressed: _login,
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      StoxOutlinedButton(
+                        label: 'MODO CONTADOR OFFLINE',
+                        icon: Icons.qr_code_scanner,
+                        onPressed: () => Navigator.push(
+                          context,
+                          StoxApp.transicaoPadrao(
+                            const ContadorOfflinePage(),
+                          ),
+                        ),
+                      ),
+
+                      const Spacer(),
+
+                      // ── Rodapé ──
+                      StoxTextButton(
+                        label: 'Configurações da API',
+                        icon: Icons.settings,
+                        onPressed: () => Navigator.push(
+                          context,
+                          StoxApp.transicaoPadrao(const ApiConfigPage()),
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      Text(
+                        kStoxVersao,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
+
+                      SizedBox(
+                        height: bottomPadding > 0
+                            ? bottomPadding + 16
+                            : 24,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          );
-        }),
+            );
+          },
+        ),
       ),
     );
   }

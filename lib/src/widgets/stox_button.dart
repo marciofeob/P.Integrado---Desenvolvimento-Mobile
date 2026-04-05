@@ -57,6 +57,25 @@ class _StoxPressableState extends State<_StoxPressable>
   }
 }
 
+// ── Helper de conteúdo ──────────────────────────────────────────────────────
+
+/// Monta o conteúdo interno dos botões: ícone + label ou só label.
+///
+/// Extraído para evitar duplicação entre [StoxButton] e [StoxOutlinedButton].
+Widget _buildIconLabel(String label, IconData? icon) {
+  const estilo = TextStyle(fontWeight: FontWeight.bold);
+  if (icon == null) return Text(label, style: estilo);
+
+  return Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Icon(icon, size: 20),
+      const SizedBox(width: 8),
+      Text(label, style: estilo),
+    ],
+  );
+}
+
 // ── StoxButton ──────────────────────────────────────────────────────────────
 
 /// Botão primário do STOX — substitui [ElevatedButton] nas telas.
@@ -64,6 +83,15 @@ class _StoxPressableState extends State<_StoxPressable>
 /// Exibe um [CircularProgressIndicator] quando [loading] é `true`
 /// e desabilita o toque automaticamente. Envolvido por [_StoxPressable]
 /// para animação de compressão ao toque.
+///
+/// ```dart
+/// StoxButton(
+///   label: 'SALVAR',
+///   icon: Icons.save_rounded,
+///   loading: _carregando,
+///   onPressed: _salvar,
+/// )
+/// ```
 class StoxButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
@@ -101,28 +129,19 @@ class StoxButton extends StatelessWidget {
           style: ElevatedButton.styleFrom(
             backgroundColor: backgroundColor,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
           child: loading
               ? const SizedBox(
                   width: 24,
                   height: 24,
                   child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2.5),
+                    color: Colors.white,
+                    strokeWidth: 2.5,
+                  ),
                 )
-              : icon != null
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(icon, size: 20),
-                        const SizedBox(width: 8),
-                        Text(label,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.bold)),
-                      ],
-                    )
-                  : Text(label,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+              : _buildIconLabel(label, icon),
         ),
       ),
     );
@@ -132,6 +151,14 @@ class StoxButton extends StatelessWidget {
 // ── StoxOutlinedButton ──────────────────────────────────────────────────────
 
 /// Botão secundário do STOX — substitui [OutlinedButton] nas telas.
+///
+/// ```dart
+/// StoxOutlinedButton(
+///   label: 'CANCELAR',
+///   icon: Icons.close,
+///   onPressed: _cancelar,
+/// )
+/// ```
 class StoxOutlinedButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
@@ -167,20 +194,10 @@ class StoxOutlinedButton extends StatelessWidget {
             foregroundColor: color,
             side: BorderSide(color: color, width: 1.5),
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
-          child: icon != null
-              ? Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(icon, size: 20),
-                    const SizedBox(width: 8),
-                    Text(label,
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                )
-              : Text(label,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
+          child: _buildIconLabel(label, icon),
         ),
       ),
     );
@@ -190,7 +207,16 @@ class StoxOutlinedButton extends StatelessWidget {
 // ── StoxDestructiveButton ───────────────────────────────────────────────────
 
 /// Botão de ação destrutiva (excluir, limpar).
+///
 /// Atalho para [StoxOutlinedButton] com cor vermelha.
+///
+/// ```dart
+/// StoxDestructiveButton(
+///   label: 'EXCLUIR',
+///   icon: Icons.delete_rounded,
+///   onPressed: _excluir,
+/// )
+/// ```
 class StoxDestructiveButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
@@ -218,6 +244,10 @@ class StoxDestructiveButton extends StatelessWidget {
 // ── StoxTextButton ──────────────────────────────────────────────────────────
 
 /// Botão de texto discreto — ações secundárias e links.
+///
+/// ```dart
+/// StoxTextButton(label: 'Configurações', icon: Icons.settings, onPressed: _irConfig)
+/// ```
 class StoxTextButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
@@ -261,7 +291,19 @@ class StoxTextButton extends StatelessWidget {
 // ── StoxFab ─────────────────────────────────────────────────────────────────
 
 /// Botão de ação flutuante (FAB) de largura total.
+///
 /// Usado para ações principais no rodapé da tela (ex.: excluir lote).
+///
+/// ```dart
+/// // No Scaffold:
+/// floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+/// floatingActionButton: StoxFab(
+///   label: 'Excluir 3 itens',
+///   icon: Icons.delete_rounded,
+///   backgroundColor: Colors.red.shade600,
+///   onPressed: _excluirSelecionados,
+/// ),
+/// ```
 class StoxFab extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -293,16 +335,21 @@ class StoxFab extends StatelessWidget {
                   }
                 : null,
             icon: Icon(icon),
-            label: Text(label,
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 15)),
+            label: Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor:
                   backgroundColor ?? Theme.of(context).primaryColor,
               foregroundColor: Colors.white,
               elevation: 4,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
         ),

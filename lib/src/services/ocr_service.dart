@@ -11,6 +11,9 @@ import 'package:image_picker/image_picker.dart';
 /// 2. Abre UI de recorte para o usuário isolar o texto
 /// 3. Processa a imagem recortada com OCR (script latino)
 /// 4. Extrai código do item e quantidade do texto reconhecido
+///
+/// Formato esperado do texto: `CÓDIGO_ITEM QUANTIDADE`
+/// (ex: "PROD001 10.5" → `{itemCode: 'PROD001', quantidade: '10.5'}`).
 class OcrService {
   OcrService._();
 
@@ -21,25 +24,27 @@ class OcrService {
   /// Captura, recorta e processa uma imagem da câmera.
   ///
   /// Retorna `{'itemCode': ..., 'quantidade': ...}` ou `null` se o usuário
-  /// cancelar em qualquer etapa ou se ocorrer um erro.
+  /// cancelar em qualquer etapa (captura, recorte) ou se ocorrer um erro.
   static Future<Map<String, String>?> lerAnotacaoDaCamera() async {
     try {
+      // 1. Captura da foto
       final imagem = await _picker.pickImage(
-        source:       ImageSource.camera,
+        source: ImageSource.camera,
         imageQuality: 85,
       );
       if (imagem == null) return null;
 
+      // 2. Recorte interativo
       final recorte = await ImageCropper().cropImage(
-        sourcePath:  imagem.path,
+        sourcePath: imagem.path,
         aspectRatio: const CropAspectRatio(ratioX: 4, ratioY: 1),
         uiSettings: [
           AndroidUiSettings(
-            toolbarTitle:       'Recorte o texto',
-            toolbarColor:       Colors.black,
+            toolbarTitle: 'Recorte o texto',
+            toolbarColor: Colors.black,
             toolbarWidgetColor: Colors.white,
-            initAspectRatio:    CropAspectRatioPreset.ratio16x9,
-            lockAspectRatio:    false,
+            initAspectRatio: CropAspectRatioPreset.ratio16x9,
+            lockAspectRatio: false,
             hideBottomControls: true,
           ),
           IOSUiSettings(title: 'Ajustar área'),
@@ -47,6 +52,7 @@ class OcrService {
       );
       if (recorte == null) return null;
 
+      // 3. OCR + parse
       final resultado = await _reconhecerTexto(recorte.path);
       return _parsearTexto(resultado);
     } catch (e) {
@@ -55,7 +61,10 @@ class OcrService {
     }
   }
 
-  /// Extrai texto de uma imagem sem recorte — uso genérico.
+  /// Extrai texto bruto de uma imagem sem recorte — uso genérico.
+  ///
+  /// Útil para cenários onde o recorte não é necessário
+  /// (ex: imagem já preparada ou galeria).
   static Future<String?> extractText({required ImageSource source}) async {
     try {
       final imagem = await _picker.pickImage(source: source);
@@ -69,24 +78,31 @@ class OcrService {
 
   // ── Helpers privados ──────────────────────────────────────────────────────
 
-  /// Executa o OCR numa imagem e retorna o texto bruto.
+  /// Executa o OCR numa imagem e retorna o texto bruto reconhecido.
+  ///
+  /// O [TextRecognizer] é sempre fechado no `finally`, mesmo em caso de erro,
+  /// para liberar recursos nativos do ML Kit.
   static Future<String> _reconhecerTexto(String caminhoArquivo) async {
     final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     try {
-      final resultado = await recognizer
-          .processImage(InputImage.fromFilePath(caminhoArquivo));
+      final resultado = await recognizer.processImage(
+        InputImage.fromFilePath(caminhoArquivo),
+      );
       return resultado.text.trim();
     } finally {
       await recognizer.close();
     }
   }
 
-  /// Interpreta o texto OCR como "CÓDIGO_ITEM QUANTIDADE".
+  /// Interpreta o texto OCR como `CÓDIGO_ITEM QUANTIDADE`.
   ///
-  /// Se a última palavra for numérica, é tratada como quantidade;
-  /// o restante é tratado como código do item.
+  /// Regras de parsing:
+  /// - Se a última palavra for numérica → quantidade; restante → código do item.
+  /// - Se houver apenas uma palavra → código do item sem quantidade.
+  /// - Vírgula decimal é convertida para ponto (padrão OCR misto).
   static Map<String, String> _parsearTexto(String texto) {
     final partes = texto.split(RegExp(r'\s+'));
+
     if (partes.isEmpty || (partes.length == 1 && partes[0].isEmpty)) {
       return {'itemCode': '', 'quantidade': ''};
     }
@@ -95,10 +111,11 @@ class OcrService {
       return {'itemCode': partes[0], 'quantidade': ''};
     }
 
+    // Tenta identificar a última parte como número
     final ultimaParte = partes.last.replaceAll(',', '.');
     if (RegExp(r'^\d+(\.\d+)?$').hasMatch(ultimaParte)) {
       return {
-        'itemCode':   partes.sublist(0, partes.length - 1).join(' '),
+        'itemCode': partes.sublist(0, partes.length - 1).join(' '),
         'quantidade': ultimaParte,
       };
     }

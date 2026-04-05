@@ -1,0 +1,102 @@
+@startuml fluxo_sincronizacao
+title STOX — Fluxo de Sincronização Dual\nGrupo JCN — 2026
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam backgroundColor white
+skinparam activityBorderColor #2E75B6
+skinparam activityBackgroundColor #E6F1FB
+skinparam activityDiamondBackgroundColor #FAEEDA
+skinparam activityDiamondBorderColor #854F0B
+
+|Operador|
+start
+:Pressiona **SINCRONIZAR AGORA**;
+
+|App STOX|
+:Busca contagens pendentes\n(syncStatus = 0 ou 2);
+
+if (Existem contagens?) then (não)
+  :Exibe "Nenhuma contagem pendente";
+  stop
+else (sim)
+endif
+
+:Separa por **countingMode**;
+
+if (countingMode?) then (single)
+
+  |App STOX|
+  :Monta payload POST\nCountingType = ctSingleCounter;
+  :Agrupa por ItemCode\n(soma quantidades);
+  :Adiciona BatchNumber = ItemCode\n(regra agrobusiness);
+
+  |SAP Service Layer|
+  :POST /InventoryCountings;
+
+  if (Resposta?) then (200/201)
+    |App STOX|
+    :syncStatus = 1 (Sincronizado);
+    :Remove contagens do banco;
+    :Feedback: check.mp3 + vibração;
+  else (erro)
+    |App STOX|
+
+    if (Código erro?) then (-1310)
+      :Exibe "Contagem já aberta no SAP"\ncom item identificado;
+    elseif (Código?) then (401)
+      :Sessão expirada\nLogout automático;
+      stop
+    else (outro)
+      :syncStatus = 2 (Erro);
+      :Exibe mensagem do SAP;
+    endif
+  endif
+
+else (multiple)
+
+  |App STOX|
+  :Lê **selected_doc_entry** e\n**counterID** do SharedPreferences;
+
+  if (doc_entry existe?) then (não)
+    :Exibe "Selecione um documento\nno menu Contagem em Equipe";
+    stop
+  else (sim)
+  endif
+
+  |SAP Service Layer|
+  :GET /InventoryCountings(entry)\nBusca documento completo;
+
+  |App STOX|
+  :Mapeia ItemCode → LineNumber\npara este counterID;
+  :Monta PATCH com **TODAS** as linhas:\n• Nossas: CountedQuantity atualizado\n• Demais: inalteradas\n• Counted = **tNO** em todas;
+
+  |SAP Service Layer|
+  :PATCH /InventoryCountings(entry);
+
+  if (Resposta?) then (204)
+    |App STOX|
+    :syncStatus = 1 (Sincronizado);
+    :Remove contagens múltiplas do banco;
+    :Feedback: check.mp3 + vibração;
+  else (erro)
+    |App STOX|
+
+    if (Código erro?) then (-5002)
+      :Linhas duplicadas\n(usar LineNumber, não ItemCode);
+    elseif (Código?) then (234000012)
+      :Counted Y/N inconsistente\n(enviar TODAS as linhas);
+    else (outro)
+      :syncStatus = 2 (Erro);
+      :Exibe mensagem do SAP;
+    endif
+  endif
+
+endif
+
+|App STOX|
+:Atualiza lista na HomePage;
+stop
+
+@enduml

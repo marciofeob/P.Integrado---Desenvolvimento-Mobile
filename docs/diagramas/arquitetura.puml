@@ -1,0 +1,88 @@
+@startuml arquitetura
+title STOX — Diagrama de Arquitetura\nGrupo JCN — 2026
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam packageBorderColor #2E75B6
+skinparam packageFontColor #1F4E79
+skinparam componentBackgroundColor #E6F1FB
+skinparam componentBorderColor #2E75B6
+skinparam databaseBackgroundColor #E1F5EE
+skinparam databaseBorderColor #0F6E56
+
+package "App Mobile Flutter (Android)" {
+
+  package "Camada de Interface (pages/)" {
+    component [login_page] as LP
+    component [home_page\n+ Drawer] as HP
+    component [contador_offline_page] as COP
+    component [import_page] as IMP
+    component [item_search_page] as ISP
+    component [etiqueta_page] as EP
+    component [api_config_page] as ACP
+    component [splash_page] as SP
+  }
+
+  package "Camada de Modelos (models/)" {
+    component [counting_config\nCountingMode + CounterInfo] as CC
+    component [label_config\nTamanho + Cópias] as LC
+  }
+
+  package "Camada de Serviços (services/)" {
+    component [SapService\nPOST + PATCH + GET] as SAP_SVC
+    component [DatabaseHelper\nSQLite v3 singleton] as DB_SVC
+    component [ExportService\nCSV UTF-8 BOM] as EXP_SVC
+    component [OcrService\nML Kit + ImageCropper] as OCR_SVC
+    component [StoxAudio\nSons + Vibração] as AUDIO
+  }
+
+  package "Camada de Widgets (widgets/)" {
+    component [StoxButton\nStoxCard\nStoxDialog] as W1
+    component [StoxSnackbar\nStoxTextField\nStoxTheme] as W2
+    component [StoxLoading\nSkeleton + Spinner] as W3
+  }
+
+}
+
+' ── Sistemas Externos ──
+
+database "SQLite\nstox_offline.db\n(v3)" as SQLITE
+cloud "SAP Service Layer\nOData v4 / HTTPS" as SAP_API
+component "Google ML Kit\n(OCR local)" as MLKIT
+component "mobile_scanner\n(12 protocolos)" as SCANNER
+component "Impressora TSPL\n(Bluetooth PT-260)" as PRINTER
+component "SharedPreferences\n(13 chaves)" as PREFS
+node "SAP Business One\nSQL Server" as SAP_B1
+component "file_picker\n(CSV import)" as FPICKER
+
+' ── Conexões ──
+
+HP --> COP : Contagem\nSimples/Equipe
+HP --> IMP : Importar CSV
+HP --> ISP : Pesquisar Item
+HP --> EP : Imprimir
+HP --> ACP : Configurar
+
+COP --> SAP_SVC : Sincronizar
+COP --> DB_SVC : Salvar local
+COP --> OCR_SVC : Ler via IA
+COP --> SCANNER : Escanear
+IMP --> DB_SVC : Importar itens
+IMP --> FPICKER : Selecionar arquivo
+ISP --> SAP_SVC : GET /Items
+EP --> PRINTER : Bluetooth TSPL
+
+SAP_SVC --> SAP_API : HTTPS
+SAP_API --> SAP_B1
+DB_SVC --> SQLITE
+OCR_SVC --> MLKIT
+SAP_SVC --> PREFS : Sessão/Config
+CC --> PREFS : Modo/CounterID
+
+LP --> SAP_SVC : Login
+LP --> PREFS : B1SESSION\nROUTEID\nInternalKey
+
+@enduml

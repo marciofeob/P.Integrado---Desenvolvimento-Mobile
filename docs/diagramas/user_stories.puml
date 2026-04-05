@@ -1,0 +1,54 @@
+@startuml user_stories
+title STOX — Caso de Uso → User Stories → MVP\nGrupo JCN — 2026
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 10
+skinparam backgroundColor white
+skinparam packageBorderColor #2E75B6
+skinparam rectangleBorderColor #2E75B6
+
+rectangle "Caso de Uso" {
+  usecase "Contagem de\nEstoque\n(fluxo completo)" as UC #E6F1FB
+}
+
+rectangle "User Stories — MVP (Implementadas)" as MVP {
+
+  usecase "US01\nLogin SAP" as US01 #E1F5EE
+  usecase "US02\nConfigurar API" as US02 #E1F5EE
+  usecase "US03\nScanner Universal\n(12 protocolos)" as US03 #E1F5EE
+  usecase "US04\nOCR via IA" as US04 #E1F5EE
+  usecase "US05\nConfirmar e\nSalvar Contagem" as US05 #E1F5EE
+  usecase "US06\nSincronizar\nvia POST" as US06 #E1F5EE
+  usecase "US07\nConsultar\nItem SAP" as US07 #E1F5EE
+  usecase "US08\nExportar CSV" as US08 #E1F5EE
+  usecase "US09\nImprimir Etiqueta\nTSPL Bluetooth" as US09 #E1F5EE
+  usecase "US10\nSelecionar Doc\nContagem Equipe" as US10 #E1F5EE
+  usecase "US11\nCounterID\nAutomático" as US11 #E1F5EE
+  usecase "US12\nSincronizar\nvia PATCH" as US12 #E1F5EE
+  usecase "US13\nImportar CSV\nColetor/STOX" as US13 #E1F5EE
+  usecase "US14\nExclusão\nMúltipla" as US14 #E1F5EE
+
+}
+
+rectangle "User Stories — Pós-MVP (Planejadas)" as POS {
+
+  usecase "US15\nRelatórios\nAvançados" as US15 #FAEEDA
+  usecase "US16\nDetectar\nDivergências" as US16 #FAEEDA
+  usecase "US17\nDashboard\nGerencial" as US17 #FAEEDA
+  usecase "US18\nHistórico por\nPeríodo" as US18 #FAEEDA
+  usecase "US19\nSugestão de\nReposição" as US19 #FAEEDA
+
+}
+
+UC --> MVP
+UC ..> POS : futuro
+
+note bottom of MVP
+  **Novas no MVP (v1.1):**
+  US10-US14 adicionadas com
+  contagem múltipla, PATCH,
+  importação CSV e TSPL
+end note
+
+@enduml

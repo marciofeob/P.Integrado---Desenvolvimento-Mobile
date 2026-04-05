@@ -1,0 +1,84 @@
+@startuml casos_de_uso
+title STOX — Diagrama de Casos de Uso\nGrupo JCN — 2026
+
+skinparam actorStyle awesome
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+
+actor "Operador" as Op
+actor "Gerente" as Ger
+actor "SAP Business One" as SAP
+actor "Google ML Kit\n(OCR)" as IA
+actor "Impressora TSPL\n(Bluetooth)" as Printer
+actor "Coletor Industrial\n(Zebra/Honeywell)" as Coletor
+
+rectangle "Sistema STOX" {
+
+  usecase "UC01\nRealizar Login" as UC01
+  usecase "UC02\nContagem Simples" as UC02
+  usecase "UC03\nContagem em Equipe" as UC03
+  usecase "UC04\nImportar CSV" as UC04
+  usecase "UC05\nSincronizar com SAP" as UC05
+  usecase "UC06\nConsultar Item SAP" as UC06
+  usecase "UC07\nExportar CSV" as UC07
+  usecase "UC08\nImprimir Etiqueta" as UC08
+  usecase "UC09\nConfigurar API" as UC09
+
+  usecase "Scanner Universal\n(12 protocolos)" as Scanner
+  usecase "OCR via IA" as OCR
+
+  ' ── Operador ──
+  Op --> UC01
+  Op --> UC02
+  Op --> UC03
+  Op --> UC05
+  Op --> UC06
+  Op --> UC07
+  Op --> UC08
+
+  ' ── Gerente ──
+  Ger --> UC03
+  Ger --> UC04
+  Ger --> UC05
+  Ger --> UC09
+
+  ' ── Includes ──
+  UC02 ..> Scanner : <<include>>
+  UC02 ..> OCR : <<include>>
+  UC03 ..> Scanner : <<include>>
+  UC03 ..> OCR : <<include>>
+
+  ' ── Extends ──
+  UC06 ..> Scanner : <<extend>>
+  UC06 ..> OCR : <<extend>>
+
+  ' ── Sistemas externos ──
+  OCR --> IA
+  UC01 --> SAP
+  UC05 --> SAP
+  UC06 --> SAP
+  UC08 --> Printer
+  UC04 <-- Coletor : CSV
+
+}
+
+note right of UC02
+  POST /InventoryCountings
+  Cria documento novo
+end note
+
+note right of UC03
+  PATCH /InventoryCountings(entry)
+  Atualiza documento existente
+end note
+
+note bottom of UC04
+  Parser inteligente:
+  detecta delimitador,
+  header e colunas
+end note
+
+@enduml

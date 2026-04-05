@@ -1,0 +1,105 @@
+@startuml banco_de_dados
+title STOX — Schema do Banco de Dados (v3)\nGrupo JCN — 2026
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam backgroundColor white
+skinparam classBorderColor #2E75B6
+skinparam classBackgroundColor #E6F1FB
+skinparam classHeaderBackgroundColor #2E75B6
+skinparam classFontColor #1F4E79
+
+package "SQLite — stox_offline.db (version: 3)" {
+
+  class contagens {
+    **id** : INTEGER PK AUTOINCREMENT
+    --
+    itemCode : TEXT NOT NULL
+    quantidade : REAL NOT NULL
+    dataHora : TEXT NOT NULL (ISO 8601)
+    syncStatus : INTEGER NOT NULL DEFAULT 0
+    warehouseCode : TEXT NOT NULL DEFAULT '01'
+    countingMode : TEXT NOT NULL DEFAULT 'single'
+    counterID : INTEGER (nullable)
+    counterName : TEXT (nullable)
+    ==
+    **Índices:**
+    idx_itemCode (itemCode)
+    idx_syncStatus (syncStatus)
+    idx_counterID (counterID)
+    idx_countingMode (countingMode)
+  }
+
+  note right of contagens
+    **syncStatus:**
+    0 = Pendente
+    1 = Sincronizado
+    2 = Erro no Envio
+
+    **countingMode:**
+    'single' = Contagem simples (POST)
+    'multiple' = Contagem equipe (PATCH)
+
+    **counterID:**
+    InternalKey do SAP
+    (salvo no login)
+  end note
+
+}
+
+package "SharedPreferences (13 chaves)" {
+
+  class "Conexão SAP" as SP1 {
+    sap_url : String
+    sap_company : String
+    sap_deposito_padrao : String
+    sap_allow_untrusted : bool
+  }
+
+  class "Sessão Ativa" as SP2 {
+    B1SESSION : String
+    ROUTEID : String
+    UserName : String
+    sap_user_internal_key : int
+  }
+
+  class "Modo de Contagem" as SP3 {
+    selected_doc_entry : int
+    selected_doc_number : int
+    counting_config : String (JSON)
+  }
+
+  class "Configurações" as SP4 {
+    label_config : String (JSON)
+  }
+
+}
+
+package "Migrations" {
+  class "v1 → v2" as M1 {
+    ALTER TABLE contagens
+    ADD COLUMN warehouseCode
+    TEXT NOT NULL DEFAULT '01'
+  }
+
+  class "v2 → v3" as M2 {
+    ALTER TABLE contagens
+    ADD COLUMN countingMode
+    TEXT NOT NULL DEFAULT 'single'
+    --
+    ALTER TABLE contagens
+    ADD COLUMN counterID INTEGER
+    --
+    ALTER TABLE contagens
+    ADD COLUMN counterName TEXT
+    --
+    CREATE INDEX idx_counterID
+    CREATE INDEX idx_countingMode
+  }
+}
+
+contagens -[hidden]-> SP1
+M1 -right-> M2 : onUpgrade
+
+@enduml

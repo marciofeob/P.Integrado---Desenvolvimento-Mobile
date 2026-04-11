@@ -15,6 +15,7 @@ import 'api_config_page.dart';
 import 'contador_offline_page.dart';
 import 'import_page.dart';
 import 'item_search_page.dart';
+import 'log_page.dart';
 import 'login_page.dart' show kStoxVersao, LoginPage;
 
 /// Painel principal do STOX.
@@ -27,9 +28,11 @@ import 'login_page.dart' show kStoxVersao, LoginPage;
 /// - Monitorar conectividade de rede em tempo real
 /// - Listar contagens pendentes do SQLite
 /// - Sincronizar com SAP (POST para simples, PATCH para múltiplo)
+///   com rastreabilidade por grupo (evita duplicação)
+/// - Registrar eventos no log do sistema
 /// - Interpretar erros SAP com mensagens amigáveis
 /// - Exportar relatório CSV
-/// - Navegação via Drawer (contagem simples, equipe, importação)
+/// - Navegação via Drawer (contagem simples, equipe, importação, log)
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -247,10 +250,12 @@ class _HomePageState extends State<HomePage> {
 
   /// Sincroniza as contagens pendentes com o SAP Business One.
   ///
-  /// Fluxo por modo de contagem:
-  /// 1. `single` (offline livre) → POST novo documento
-  /// 2. `single_doc` (documento simples selecionado) → PATCH sem CounterID
-  /// 3. `multiple` (documento múltiplo selecionado) → PATCH com CounterID
+  /// Cada grupo (single / single_doc / multiple) é sincronizado de forma
+  /// **independente** — o sucesso de um grupo não depende dos outros.
+  /// Para cada grupo, cria um registro de `envio` no SQLite com o resultado
+  /// e vincula as contagens ao envio correspondente.
+  ///
+  /// Todos os eventos são registrados no log do sistema para auditoria.
   Future<void> _sincronizarComSAP() async {
     if (_contagens.isEmpty) return;
     if (_semInternet) {
@@ -259,6 +264,10 @@ class _HomePageState extends State<HomePage> {
     }
     HapticFeedback.lightImpact();
     setState(() => _carregando = true);
+
+    final db = DatabaseHelper.instance;
+    await db.logInfo('sync', 'Sincronização iniciada',
+        mensagem: '${_contagens.length} contagem(ns) pendente(s).');
 
     try {
       // Separa contagens por modo
@@ -272,68 +281,174 @@ class _HomePageState extends State<HomePage> {
           .where((c) => c['countingMode'] == 'multiple')
           .toList();
 
-      String? erroFinal;
+      int sucessos = 0;
+      int falhas = 0;
+      String? ultimoErro;
 
-      // 1. Contagem livre (POST cria novo documento)
+      // ── 1. Contagem livre (POST cria novo documento) ──
       if (livres.isNotEmpty) {
+        final envioId = await db.criarEnvio(
+          modo: 'single',
+          totalItens: livres.length,
+        );
+        final ids = livres.map((c) => c['id'] as int).toList();
         final erro = await SapService.postInventoryCounting(livres);
-        if (erro != null) erroFinal = erro;
+
+        if (erro == null) {
+          await db.finalizarEnvio(envioId, status: 1);
+          await db.vincularContagensAoEnvio(ids, envioId, 1);
+          await db.logSucesso('sync', 'POST concluído',
+              mensagem:
+                  '${livres.length} item(ns) enviado(s) como novo documento.');
+          sucessos++;
+        } else {
+          await db.finalizarEnvio(envioId, status: 2, mensagemErro: erro);
+          await db.vincularContagensAoEnvio(ids, envioId, 2);
+          await db.logErro('sync', 'Falha no POST',
+              mensagem:
+                  '${livres.length} item(ns) — modo Simples (Livre).',
+              detalhes: erro);
+          ultimoErro = erro;
+          falhas++;
+        }
       }
 
-      // 2. Contagem simples com documento (PATCH sem CounterID)
+      // ── 2. Contagem simples com documento (PATCH sem CounterID) ──
       if (simplesDoc.isNotEmpty) {
         final prefs = await SharedPreferences.getInstance();
         final docEntry = prefs.getInt('selected_doc_entry');
+        final docNumber = prefs.getInt('selected_doc_number');
+
+        final envioId = await db.criarEnvio(
+          modo: 'single_doc',
+          totalItens: simplesDoc.length,
+          docEntry: docEntry,
+          docNumber: docNumber,
+        );
+        final ids = simplesDoc.map((c) => c['id'] as int).toList();
 
         if (docEntry == null) {
-          erroFinal ??=
-              'Documento não identificado. '
+          const erro = 'Documento não identificado. '
               'Selecione um documento de contagem simples no menu.';
+          await db.finalizarEnvio(envioId, status: 2, mensagemErro: erro);
+          await db.vincularContagensAoEnvio(ids, envioId, 2);
+          await db.logAviso('sync', 'Documento não selecionado',
+              mensagem: erro);
+          ultimoErro = erro;
+          falhas++;
         } else {
           final erro = await SapService.patchSingleCounting(
             documentEntry: docEntry,
             contagens: simplesDoc,
           );
-          if (erro != null) erroFinal = erro;
+          if (erro == null) {
+            await db.finalizarEnvio(envioId, status: 1);
+            await db.vincularContagensAoEnvio(ids, envioId, 1);
+            await db.logSucesso('sync', 'PATCH simples concluído',
+                mensagem:
+                    '${simplesDoc.length} item(ns) no Doc #$docNumber.');
+            sucessos++;
+          } else {
+            await db.finalizarEnvio(envioId, status: 2, mensagemErro: erro);
+            await db.vincularContagensAoEnvio(ids, envioId, 2);
+            await db.logErro('sync', 'Falha no PATCH simples',
+                mensagem:
+                    '${simplesDoc.length} item(ns) — Doc #$docNumber.',
+                detalhes: erro);
+            ultimoErro = erro;
+            falhas++;
+          }
         }
       }
 
-      // 3. Contagem múltipla (PATCH com CounterID)
+      // ── 3. Contagem múltipla (PATCH com CounterID) ──
       if (multiplos.isNotEmpty) {
         final prefs = await SharedPreferences.getInstance();
         final docEntry = prefs.getInt('selected_doc_entry');
+        final docNumber = prefs.getInt('selected_doc_number');
         final counterID = await SapService.getCounterID();
 
+        final envioId = await db.criarEnvio(
+          modo: 'multiple',
+          totalItens: multiplos.length,
+          docEntry: docEntry,
+          docNumber: docNumber,
+        );
+        final ids = multiplos.map((c) => c['id'] as int).toList();
+
         if (docEntry == null) {
-          erroFinal ??=
-              'Documento não identificado. '
+          const erro = 'Documento não identificado. '
               'Selecione um documento de contagem em equipe no menu.';
+          await db.finalizarEnvio(envioId, status: 2, mensagemErro: erro);
+          await db.vincularContagensAoEnvio(ids, envioId, 2);
+          await db.logAviso('sync', 'Documento não selecionado',
+              mensagem: erro);
+          ultimoErro = erro;
+          falhas++;
         } else if (counterID == null) {
-          erroFinal ??=
-              'Seu contador (InternalKey) não foi identificado. '
+          const erro = 'Seu contador (InternalKey) não foi identificado. '
               'Faça logout e login novamente para resolver.';
+          await db.finalizarEnvio(envioId, status: 2, mensagemErro: erro);
+          await db.vincularContagensAoEnvio(ids, envioId, 2);
+          await db.logAviso('sync', 'CounterID não encontrado',
+              mensagem: erro);
+          ultimoErro = erro;
+          falhas++;
         } else {
           final erro = await SapService.patchInventoryCounting(
             documentEntry: docEntry,
             contagens: multiplos,
             counterID: counterID,
           );
-          if (erro != null) erroFinal = erro;
+          if (erro == null) {
+            await db.finalizarEnvio(envioId, status: 1);
+            await db.vincularContagensAoEnvio(ids, envioId, 1);
+            await db.logSucesso('sync', 'PATCH múltiplo concluído',
+                mensagem:
+                    '${multiplos.length} item(ns) — Doc #$docNumber '
+                    '— Contador #$counterID.');
+            sucessos++;
+          } else {
+            await db.finalizarEnvio(envioId, status: 2, mensagemErro: erro);
+            await db.vincularContagensAoEnvio(ids, envioId, 2);
+            await db.logErro('sync', 'Falha no PATCH múltiplo',
+                mensagem:
+                    '${multiplos.length} item(ns) — Doc #$docNumber.',
+                detalhes: erro);
+            ultimoErro = erro;
+            falhas++;
+          }
         }
       }
-      // 4. Feedback ao operador
-      if (erroFinal == null) {
+
+      // ── 4. Limpar contagens sincronizadas e recarregar ──
+      await db.limparContagensSincronizadas();
+      await _carregarContagens();
+      if (!mounted) return;
+
+      if (falhas == 0) {
         await StoxAudio.play('sounds/check.mp3');
-        await DatabaseHelper.instance.limparContagens();
-        await _carregarContagens();
         if (!mounted) return;
         StoxSnackbar.sucesso(context, 'Sincronização concluída com sucesso!');
+      } else if (sucessos > 0) {
+        await db.logAviso('sync', 'Sincronização parcial',
+            mensagem: '$sucessos grupo(s) ok, $falhas com erro.');
+        await StoxAudio.play('sounds/error_beep.mp3', isError: true);
+        if (!mounted) return;
+        StoxSnackbar.aviso(
+          context,
+          '$sucessos grupo(s) sincronizado(s), $falhas com erro.',
+        );
+        _exibirErroSap(ultimoErro!);
       } else {
         await StoxAudio.play('sounds/fail.mp3', isFail: true);
         if (!mounted) return;
-        _exibirErroSap(erroFinal);
+        _exibirErroSap(ultimoErro!);
       }
     } catch (e) {
+      await db.logErro('sync', 'Falha de comunicação',
+          mensagem: 'Exceção durante a sincronização.',
+          detalhes: '$e');
       await StoxAudio.play('sounds/fail.mp3', isFail: true);
       if (!mounted) return;
       StoxSnackbar.erro(
@@ -348,14 +463,6 @@ class _HomePageState extends State<HomePage> {
   // ── Interpretação de erros SAP ────────────────────────────────────────────
 
   /// Analisa a mensagem de erro bruta do SAP e retorna um [_ErroSap] amigável.
-  ///
-  /// Usa um sistema de pontuação para identificar o tipo mais provável:
-  /// - Contagem já aberta (código -1310 / 1470000497)
-  /// - Sessão expirada (401 / UNAUTHORIZED)
-  /// - Falha de rede (TIMEOUT / CONNECTION / SOCKET)
-  /// - Item não encontrado (código -4002)
-  /// - Depósito inválido (código -5002)
-  /// - Erro genérico (fallback)
   _ErroSap _interpretarErroSap(String mensagemBruta) {
     final msg = mensagemBruta.toUpperCase();
     final tecnico = mensagemBruta.length > 300
@@ -453,7 +560,6 @@ class _HomePageState extends State<HomePage> {
     }
     if (msg.contains('WAREHOUSE') && pontoDeposito == 0) pontoDeposito += 1;
 
-    // ── Item não encontrado ──
     if (pontoItem > pontoDeposito && pontoItem > 0) {
       return _ErroSap(
         icone: Icons.inventory_2_rounded,
@@ -471,7 +577,6 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // ── Depósito inválido ──
     if (pontoDeposito > pontoItem && pontoDeposito > 1) {
       return _ErroSap(
         icone: Icons.warning_amber_rounded,
@@ -489,7 +594,6 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // ── Erro genérico (fallback) ──
     return _ErroSap(
       icone: Icons.error_outline_rounded,
       cor: Colors.red.shade700,
@@ -549,18 +653,13 @@ class _HomePageState extends State<HomePage> {
                 style: const TextStyle(fontSize: 14, height: 1.5),
               ),
               const SizedBox(height: 16),
-
-              // ── Card de orientação ──
               StoxCard(
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.info_outline_rounded,
-                      color: Colors.blue.shade700,
-                      size: 18,
-                    ),
+                    Icon(Icons.info_outline_rounded,
+                        color: Colors.blue.shade700, size: 18),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -575,8 +674,6 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
               ),
-
-              // ── Retorno técnico SAP (selecionável) ──
               if (erro.codigoTecnico != null) ...[
                 const SizedBox(height: 12),
                 Text(
@@ -662,7 +759,6 @@ class _HomePageState extends State<HomePage> {
         ),
         elevation: 0,
         actions: [
-          // ── Indicador SAP na barra de título ──
           Padding(
             padding: const EdgeInsets.only(right: 4),
             child: _buildAppBarStatusChip(),
@@ -756,7 +852,6 @@ class _HomePageState extends State<HomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Linha 1: Contagem Simples + Contagem em Equipe ──
         Row(
           children: [
             Expanded(
@@ -767,11 +862,9 @@ class _HomePageState extends State<HomePage> {
                 cor: theme.primaryColor,
                 onTap: () {
                   if (!_sapConectado || _semInternet) {
-                    // Sem sessão SAP → vai direto pro modo offline livre
                     _abrirContagemSimplesDireta();
                     return;
                   }
-                  // Com sessão SAP → mostra documentos simples abertos
                   _mostrarDocumentosSimples();
                 },
               ),
@@ -804,8 +897,6 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         const SizedBox(height: 10),
-
-        // ── Linha 2: Pesquisar + Importar CSV ──
         Row(
           children: [
             Expanded(
@@ -891,7 +982,6 @@ class _HomePageState extends State<HomePage> {
 
   // ── Indicador SAP na AppBar ─────────────────────────────────────────────
 
-  /// Chip compacto de status de conexão exibido na barra de título.
   Widget _buildAppBarStatusChip() {
     final Color cor;
     final IconData icone;
@@ -938,7 +1028,6 @@ class _HomePageState extends State<HomePage> {
 
   // ── Lista de contagens ────────────────────────────────────────────────────
 
-  /// Cabeçalho da seção de contagens pendentes.
   Widget _buildContagensHeader() {
     return Row(
       children: [
@@ -1079,7 +1168,6 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ── Handle ──
           const SizedBox(height: 12),
           Container(
             width: 48,
@@ -1089,26 +1177,17 @@ class _HomePageState extends State<HomePage> {
               borderRadius: BorderRadius.circular(10),
             ),
           ),
-
-          // ── Cabeçalho ──
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
             child: Row(
               children: [
-                Icon(
-                  Icons.assignment_rounded,
-                  color: theme.primaryColor,
-                  size: 24,
-                ),
+                Icon(Icons.assignment_rounded,
+                    color: theme.primaryColor, size: 24),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    titulo,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 17,
-                    ),
-                  ),
+                  child: Text(titulo,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 17)),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close_rounded),
@@ -1119,19 +1198,12 @@ class _HomePageState extends State<HomePage> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Text(
-              subtitulo,
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-            ),
+            child: Text(subtitulo,
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
           ),
-
-          // ── Botão extra (ex: "Contagem Livre" no modo simples) ──
           if (acaoExtra != null)
             Padding(padding: const EdgeInsets.only(top: 8), child: acaoExtra),
-
           const SizedBox(height: 16),
-
-          // ── Lista de documentos ──
           if (_carregandoDocs)
             const Padding(
               padding: EdgeInsets.all(32),
@@ -1171,15 +1243,12 @@ class _HomePageState extends State<HomePage> {
         onTap: () async {
           HapticFeedback.selectionClick();
           Navigator.pop(sheetCtx);
-
-          // Salva dados do documento selecionado
           final prefs = await SharedPreferences.getInstance();
           await Future.wait([
             prefs.setInt('selected_doc_entry', docEntry),
             prefs.setInt('selected_doc_number', docNum is int ? docNum : 0),
             prefs.setString('selected_doc_type', tipo),
           ]);
-
           if (!mounted) return;
           Navigator.push(
             context,
@@ -1192,7 +1261,6 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header do card ──
               Row(
                 children: [
                   Icon(
@@ -1203,19 +1271,13 @@ class _HomePageState extends State<HomePage> {
                     size: 20,
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Doc #$docNum',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                    ),
-                  ),
+                  Text('Doc #$docNum',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15)),
                   const Spacer(),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
+                        horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: isMultiplo
                           ? Colors.purple.shade50
@@ -1236,53 +1298,40 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
               const SizedBox(height: 8),
-
-              // ── Detalhes ──
-              Text(
-                'Data: $countDate',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-              ),
+              Text('Data: $countDate',
+                  style:
+                      TextStyle(fontSize: 13, color: Colors.grey.shade600)),
               if (contadores.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
                   'Contadores: ${contadores.map((c) => c['CounterName']).join(', ')}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  style:
+                      TextStyle(fontSize: 12, color: Colors.grey.shade500),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
               if (remarks.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text(
-                  remarks,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade500,
-                    fontStyle: FontStyle.italic,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text(remarks,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                        fontStyle: FontStyle.italic),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
               ],
-
-              // ── CTA ──
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Icon(
-                    Icons.touch_app_rounded,
-                    size: 14,
-                    color: theme.primaryColor,
-                  ),
+                  Icon(Icons.touch_app_rounded,
+                      size: 14, color: theme.primaryColor),
                   const SizedBox(width: 4),
-                  Text(
-                    'Toque para iniciar contagem',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: theme.primaryColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  Text('Toque para iniciar contagem',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: theme.primaryColor,
+                          fontWeight: FontWeight.w600)),
                 ],
               ),
             ],
@@ -1299,7 +1348,6 @@ class _HomePageState extends State<HomePage> {
     return Drawer(
       child: Column(
         children: [
-          // ── Header do Drawer ──
           UserAccountsDrawerHeader(
             decoration: BoxDecoration(color: theme.primaryColor),
             currentAccountPicture: const CircleAvatar(
@@ -1336,29 +1384,22 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-
-          // ── Menu principal ──
           Expanded(
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
                 // ── Contagem Simples ──
                 ListTile(
-                  leading: Icon(
-                    Icons.add_box_rounded,
-                    color: theme.primaryColor,
-                  ),
-                  title: const Text(
-                    'Contagem Simples',
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  subtitle: Text(
-                    'Um operador conta e sincroniza',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                  ),
+                  leading: Icon(Icons.add_box_rounded,
+                      color: theme.primaryColor),
+                  title: const Text('Contagem Simples',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: Text('Um operador conta e sincroniza',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade500)),
                   onTap: () {
                     HapticFeedback.selectionClick();
-                    Navigator.pop(context); // fecha drawer
+                    Navigator.pop(context);
                     if (_sapConectado && !_semInternet) {
                       _mostrarDocumentosSimples();
                     } else {
@@ -1369,69 +1410,55 @@ class _HomePageState extends State<HomePage> {
 
                 // ── Contagem em Equipe ──
                 ListTile(
-                  leading: Icon(
-                    Icons.groups_rounded,
-                    color: _sapConectado
-                        ? Colors.purple.shade700
-                        : Colors.grey.shade400,
-                  ),
-                  title: Text(
-                    'Contagem em Equipe',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w500,
-                      color: _sapConectado ? null : Colors.grey.shade400,
-                    ),
-                  ),
-                  subtitle: Text(
-                    _sapConectado
-                        ? 'Selecionar documento do SAP'
-                        : 'Faça login no SAP primeiro',
-                    style: TextStyle(
-                      fontSize: 12,
+                  leading: Icon(Icons.groups_rounded,
                       color: _sapConectado
-                          ? Colors.grey.shade500
-                          : Colors.grey.shade400,
-                    ),
-                  ),
+                          ? Colors.purple.shade700
+                          : Colors.grey.shade400),
+                  title: Text('Contagem em Equipe',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color:
+                              _sapConectado ? null : Colors.grey.shade400)),
+                  subtitle: Text(
+                      _sapConectado
+                          ? 'Selecionar documento do SAP'
+                          : 'Faça login no SAP primeiro',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: _sapConectado
+                              ? Colors.grey.shade500
+                              : Colors.grey.shade400)),
                   trailing: _carregandoDocs
                       ? SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.purple.shade400,
-                          ),
-                        )
+                              strokeWidth: 2,
+                              color: Colors.purple.shade400))
                       : null,
                   enabled: _sapConectado && !_semInternet,
                   onTap: () {
                     HapticFeedback.selectionClick();
-                    Navigator.pop(context); // fecha drawer
+                    Navigator.pop(context);
                     _mostrarDocumentosMultiplos();
                   },
                 ),
 
                 // ── Importar Contagem ──
                 ListTile(
-                  leading: Icon(
-                    Icons.upload_file_rounded,
-                    color: Colors.orange.shade700,
-                  ),
-                  title: const Text(
-                    'Importar Contagem',
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  subtitle: Text(
-                    'CSV de outro STOX ou coletor',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                  ),
+                  leading: Icon(Icons.upload_file_rounded,
+                      color: Colors.orange.shade700),
+                  title: const Text('Importar Contagem',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: Text('CSV de outro STOX ou coletor',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade500)),
                   onTap: () {
                     HapticFeedback.selectionClick();
                     Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      StoxApp.transicaoPadrao(const ImportPage()),
-                    ).then((_) => _carregarContagens());
+                    Navigator.push(context,
+                            StoxApp.transicaoPadrao(const ImportPage()))
+                        .then((_) => _carregarContagens());
                   },
                 ),
 
@@ -1439,46 +1466,52 @@ class _HomePageState extends State<HomePage> {
 
                 // ── Pesquisar Item ──
                 ListTile(
-                  leading: Icon(
-                    Icons.search_rounded,
-                    color: theme.primaryColor,
-                  ),
-                  title: const Text(
-                    'Pesquisar Item SAP',
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                  ),
+                  leading: Icon(Icons.search_rounded,
+                      color: theme.primaryColor),
+                  title: const Text('Pesquisar Item SAP',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
                   onTap: () {
                     HapticFeedback.selectionClick();
                     Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      StoxApp.transicaoPadrao(const ItemSearchPage()),
-                    );
+                    Navigator.push(context,
+                        StoxApp.transicaoPadrao(const ItemSearchPage()));
                   },
                 ),
 
                 _buildDrawerDivider(),
 
-                // ── Configurações ──
+                // ── Log do Sistema ──
                 ListTile(
-                  leading: Icon(
-                    Icons.settings_rounded,
-                    color: Colors.grey.shade600,
-                  ),
-                  title: Text(
-                    'Configurações da API',
+                  leading: Icon(Icons.receipt_long_rounded,
+                      color: Colors.blueGrey.shade600),
+                  title: const Text('Log do Sistema',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: Text(
+                    'Histórico de atividades e envios',
                     style: TextStyle(
-                      color: Colors.grey.shade800,
-                      fontWeight: FontWeight.w500,
-                    ),
+                        fontSize: 12, color: Colors.grey.shade500),
                   ),
                   onTap: () {
                     HapticFeedback.selectionClick();
                     Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      StoxApp.transicaoPadrao(const ApiConfigPage()),
-                    );
+                    Navigator.push(context,
+                        StoxApp.transicaoPadrao(const LogPage()));
+                  },
+                ),
+
+                // ── Configurações ──
+                ListTile(
+                  leading: Icon(Icons.settings_rounded,
+                      color: Colors.grey.shade600),
+                  title: Text('Configurações da API',
+                      style: TextStyle(
+                          color: Colors.grey.shade800,
+                          fontWeight: FontWeight.w500)),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    Navigator.pop(context);
+                    Navigator.push(context,
+                        StoxApp.transicaoPadrao(const ApiConfigPage()));
                   },
                 ),
               ],
@@ -1489,13 +1522,17 @@ class _HomePageState extends State<HomePage> {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.logout_rounded, color: Colors.red),
-            title: const Text(
-              'Sair da Conta',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-            ),
+            title: const Text('Sair da Conta',
+                style: TextStyle(
+                    color: Colors.red, fontWeight: FontWeight.bold)),
             onTap: () async {
               HapticFeedback.heavyImpact();
               await SapService.logout();
+              await DatabaseHelper.instance.logInfo(
+                'auth',
+                'Logout realizado',
+                mensagem: 'Operador: $_nomeOperador.',
+              );
               if (!mounted) return;
               Navigator.pushAndRemoveUntil(
                 context,
@@ -1531,27 +1568,12 @@ class _HomePageState extends State<HomePage> {
 
 // ── Modelo de erro amigável ─────────────────────────────────────────────────
 
-/// Dados de um erro SAP interpretado para exibição amigável ao operador.
-///
-/// Usado por [_HomePageState._interpretarErroSap] para transformar
-/// mensagens técnicas do SAP em feedback compreensível.
 class _ErroSap {
-  /// Ícone ilustrativo do tipo de erro.
   final IconData icone;
-
-  /// Cor do ícone e do botão de ação.
   final Color cor;
-
-  /// Título curto e descritivo (ex: "Sessão expirada").
   final String titulo;
-
-  /// Explicação do erro em linguagem simples.
   final String mensagem;
-
-  /// Instruções de como resolver o problema.
   final String orientacao;
-
-  /// Mensagem técnica original do SAP (exibida em `SelectableText`).
   final String? codigoTecnico;
 
   const _ErroSap({

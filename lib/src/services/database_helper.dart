@@ -5,16 +5,20 @@ import 'package:sqflite/sqflite.dart';
 /// Singleton de acesso ao banco SQLite local do STOX.
 ///
 /// Gerencia o ciclo de vida do banco, migrations e operações CRUD
-/// das tabelas `contagens` e `envios`.
+/// das tabelas `contagens`, `envios` e `logs`.
 ///
 /// Campos de controle — tabela `contagens`:
 /// - `syncStatus`: 0 = Pendente, 1 = Sincronizado, 2 = Erro no envio.
-/// - `countingMode`: `'single'` = Contador simples, `'multiple'` = Contadores múltiplos.
+/// - `countingMode`: `'single'` | `'single_doc'` | `'multiple'`.
 /// - `counterID`: `InternalKey` SAP do contador (`null` = modo simples).
 /// - `envioId`: referência ao registro de envio (`null` = ainda não enviado).
 ///
 /// Campos de controle — tabela `envios`:
 /// - `status`: 0 = Pendente, 1 = Sucesso, 2 = Erro.
+///
+/// Campos de controle — tabela `logs`:
+/// - `nivel`: `'info'` | `'sucesso'` | `'aviso'` | `'erro'`.
+/// - `categoria`: `'sync'` | `'auth'` | `'import'` | `'sistema'`.
 ///
 /// Uso:
 /// ```dart
@@ -36,6 +40,10 @@ class DatabaseHelper {
   /// Versão atual do schema (incrementar ao adicionar migrations).
   static const int _versao = 4;
 
+  /// Retenção máxima de logs em dias.
+  /// Logs mais antigos são removidos automaticamente na inicialização.
+  static const int _retencaoLogsDias = 90;
+
   DatabaseHelper._init();
 
   // ── Inicialização ─────────────────────────────────────────────────────────
@@ -52,12 +60,17 @@ class DatabaseHelper {
 
   Future<Database> _initDB() async {
     final caminho = join(await getDatabasesPath(), _nomeArquivo);
-    return openDatabase(
+    final db = await openDatabase(
       caminho,
       version: _versao,
       onCreate: _criarTabelas,
       onUpgrade: _migrar,
     );
+
+    // Auto-prune: remove logs com mais de 90 dias
+    await _podarLogsAntigos(db);
+
+    return db;
   }
 
   /// Cria o schema completo na primeira instalação.
@@ -90,6 +103,18 @@ class DatabaseHelper {
       )
     ''');
 
+    await db.execute('''
+      CREATE TABLE logs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        dataHora   TEXT    NOT NULL,
+        nivel      TEXT    NOT NULL,
+        categoria  TEXT    NOT NULL,
+        titulo     TEXT    NOT NULL,
+        mensagem   TEXT,
+        detalhes   TEXT
+      )
+    ''');
+
     // Índices — contagens
     await db.execute(
         'CREATE INDEX idx_itemCode     ON contagens (itemCode)');
@@ -105,22 +130,25 @@ class DatabaseHelper {
     // Índices — envios
     await db.execute(
         'CREATE INDEX idx_envios_status ON envios (status)');
+
+    // Índices — logs
+    await db.execute(
+        'CREATE INDEX idx_logs_dataHora  ON logs (dataHora)');
+    await db.execute(
+        'CREATE INDEX idx_logs_nivel     ON logs (nivel)');
+    await db.execute(
+        'CREATE INDEX idx_logs_categoria ON logs (categoria)');
   }
 
   /// Aplica migrations incrementais para usuários que já tinham o banco.
-  ///
-  /// Cada bloco `if (oldVersion < N)` é executado uma única vez.
-  /// Ao adicionar nova migration, incrementar [_versao] e adicionar bloco aqui.
   Future<void> _migrar(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // v1 → v2: adição da coluna warehouseCode
       await db.execute(
         "ALTER TABLE contagens ADD COLUMN warehouseCode "
         "TEXT NOT NULL DEFAULT '01'",
       );
     }
     if (oldVersion < 3) {
-      // v2 → v3: suporte a contadores múltiplos
       await db.execute(
         "ALTER TABLE contagens ADD COLUMN countingMode "
         "TEXT NOT NULL DEFAULT 'single'",
@@ -140,14 +168,15 @@ class DatabaseHelper {
       );
     }
     if (oldVersion < 4) {
-      // v3 → v4: rastreabilidade de envios (fix bug de duplicação)
+      // v3 → v4: rastreabilidade de envios + sistema de logs
+
+      // Envios (fix bug de duplicação na sincronização)
       await db.execute(
         'ALTER TABLE contagens ADD COLUMN envioId INTEGER',
       );
       await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_envioId ON contagens (envioId)',
       );
-
       await db.execute('''
         CREATE TABLE IF NOT EXISTS envios (
           id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,9 +192,58 @@ class DatabaseHelper {
       await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_envios_status ON envios (status)',
       );
+
+      // Logs (registro de atividades do app)
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS logs (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          dataHora   TEXT    NOT NULL,
+          nivel      TEXT    NOT NULL,
+          categoria  TEXT    NOT NULL,
+          titulo     TEXT    NOT NULL,
+          mensagem   TEXT,
+          detalhes   TEXT
+        )
+      ''');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_logs_dataHora ON logs (dataHora)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_logs_nivel ON logs (nivel)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_logs_categoria ON logs (categoria)',
+      );
     }
     // Para futuras versões: if (oldVersion < 5) { ... }
   }
+
+  /// Remove logs com mais de [_retencaoLogsDias] dias.
+  ///
+  /// Executado automaticamente na abertura do banco.
+  /// Silencia erros para não impedir a inicialização do app.
+  Future<void> _podarLogsAntigos(Database db) async {
+    try {
+      final corte = DateTime.now()
+          .subtract(const Duration(days: _retencaoLogsDias))
+          .toIso8601String();
+      final removidos = await db.delete(
+        'logs',
+        where: 'dataHora < ?',
+        whereArgs: [corte],
+      );
+      if (removidos > 0 && kDebugMode) {
+        debugPrint('DatabaseHelper: $removidos logs antigos removidos '
+            '(>${_retencaoLogsDias}d)');
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('DatabaseHelper._podarLogsAntigos: $e');
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── CONTAGENS ─────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
 
   // ── Inserção e atualização ────────────────────────────────────────────────
 
@@ -294,7 +372,7 @@ class DatabaseHelper {
     );
   }
 
-  /// Retorna contagens filtradas por modo de contagem (`'single'`/`'multiple'`).
+  /// Retorna contagens filtradas por modo de contagem.
   Future<List<Map<String, dynamic>>> buscarContagensPorModo(
     String modo,
   ) async {
@@ -321,8 +399,6 @@ class DatabaseHelper {
   }
 
   /// Retorna os IDs distintos de contadores que participaram da contagem.
-  ///
-  /// Útil para montar o bloco `IndividualCounters` do payload SAP.
   Future<List<Map<String, dynamic>>> buscarContadoresDistintos() async {
     final db = await database;
     return db.rawQuery('''
@@ -334,8 +410,6 @@ class DatabaseHelper {
   }
 
   /// Calcula a soma total de quantidade para um [itemCode] específico.
-  ///
-  /// Retorna `0.0` se o item não existir no banco.
   Future<double> calcularTotalPorItem(String itemCode) async {
     final db = await database;
     final result = await db.rawQuery(
@@ -346,11 +420,11 @@ class DatabaseHelper {
     return total == null ? 0.0 : (total as num).toDouble();
   }
 
-  // ── Envios (histórico de sincronizações) ──────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── ENVIOS (rastreabilidade de sincronizações) ────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
 
   /// Cria um registro de envio no início de uma sincronização.
-  ///
-  /// Retorna o `id` do envio criado.
   Future<int> criarEnvio({
     required String modo,
     required int totalItens,
@@ -369,8 +443,6 @@ class DatabaseHelper {
   }
 
   /// Atualiza o resultado de um envio após a resposta do SAP.
-  ///
-  /// [status]: 1 = Sucesso, 2 = Erro.
   Future<void> finalizarEnvio(
     int envioId, {
     required int status,
@@ -385,7 +457,7 @@ class DatabaseHelper {
     );
   }
 
-  /// Retorna os envios mais recentes. Limitado a [limite] registros.
+  /// Retorna os envios mais recentes.
   Future<List<Map<String, dynamic>>> buscarEnvios({int limite = 50}) async {
     final db = await database;
     return db.query('envios', orderBy: 'dataEnvio DESC', limit: limite);
@@ -395,6 +467,124 @@ class DatabaseHelper {
   Future<void> limparEnvios() async {
     final db = await database;
     await db.delete('envios');
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── LOGS (registro de atividades do sistema) ──────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Registra um evento no log do sistema.
+  ///
+  /// [nivel]: `'info'` | `'sucesso'` | `'aviso'` | `'erro'`.
+  /// [categoria]: `'sync'` | `'auth'` | `'import'` | `'sistema'`.
+  /// [titulo]: resumo curto do evento (ex: "Sincronização concluída").
+  /// [mensagem]: detalhes legíveis para o operador.
+  /// [detalhes]: informação técnica (ex: resposta do SAP, stack trace).
+  ///
+  /// Silencia erros — o log nunca deve impedir o funcionamento do app.
+  Future<void> registrarLog({
+    required String nivel,
+    required String categoria,
+    required String titulo,
+    String? mensagem,
+    String? detalhes,
+  }) async {
+    try {
+      final db = await database;
+      await db.insert('logs', {
+        'dataHora': DateTime.now().toIso8601String(),
+        'nivel': nivel,
+        'categoria': categoria,
+        'titulo': titulo,
+        'mensagem': mensagem,
+        'detalhes': detalhes,
+      });
+    } catch (e) {
+      if (kDebugMode) debugPrint('DatabaseHelper.registrarLog: $e');
+    }
+  }
+
+  /// Atalhos de log por nível.
+  Future<void> logInfo(String categoria, String titulo,
+          {String? mensagem, String? detalhes}) =>
+      registrarLog(
+          nivel: 'info',
+          categoria: categoria,
+          titulo: titulo,
+          mensagem: mensagem,
+          detalhes: detalhes);
+
+  Future<void> logSucesso(String categoria, String titulo,
+          {String? mensagem, String? detalhes}) =>
+      registrarLog(
+          nivel: 'sucesso',
+          categoria: categoria,
+          titulo: titulo,
+          mensagem: mensagem,
+          detalhes: detalhes);
+
+  Future<void> logAviso(String categoria, String titulo,
+          {String? mensagem, String? detalhes}) =>
+      registrarLog(
+          nivel: 'aviso',
+          categoria: categoria,
+          titulo: titulo,
+          mensagem: mensagem,
+          detalhes: detalhes);
+
+  Future<void> logErro(String categoria, String titulo,
+          {String? mensagem, String? detalhes}) =>
+      registrarLog(
+          nivel: 'erro',
+          categoria: categoria,
+          titulo: titulo,
+          mensagem: mensagem,
+          detalhes: detalhes);
+
+  /// Retorna logs filtrados por [nivel] e/ou [categoria].
+  ///
+  /// Sem filtros, retorna todos. Limitado a [limite] registros.
+  Future<List<Map<String, dynamic>>> buscarLogs({
+    String? nivel,
+    String? categoria,
+    int limite = 200,
+  }) async {
+    final db = await database;
+
+    final where = <String>[];
+    final args = <dynamic>[];
+
+    if (nivel != null) {
+      where.add('nivel = ?');
+      args.add(nivel);
+    }
+    if (categoria != null) {
+      where.add('categoria = ?');
+      args.add(categoria);
+    }
+
+    return db.query(
+      'logs',
+      where: where.isEmpty ? null : where.join(' AND '),
+      whereArgs: args.isEmpty ? null : args,
+      orderBy: 'dataHora DESC',
+      limit: limite,
+    );
+  }
+
+  /// Retorna a quantidade total de logs por nível.
+  ///
+  /// Resultado: `{'info': 42, 'sucesso': 15, 'aviso': 3, 'erro': 2}`.
+  Future<Map<String, int>> contarLogsPorNivel() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT nivel, COUNT(*) AS total FROM logs GROUP BY nivel',
+    );
+    final mapa = <String, int>{};
+    for (final row in result) {
+      mapa[row['nivel'] as String] = row['total'] as int;
+    }
+    return mapa;
   }
 
   // ── Ciclo de vida ─────────────────────────────────────────────────────────

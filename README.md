@@ -1,5 +1,7 @@
 #  STOX
 
+<p align="center">🌐 <a href="https://marciofeob.github.io/P.Integrado---Desenvolvimento-Mobile/">Site de apresentação no GitHub Pages</a></p>
+
 ### Plataforma Inteligente de Gestão de Inventário
 
 *Solução Mobile Corporativa Integrada ao SAP Business One*

@@ -10,12 +10,6 @@ import 'api_config_page.dart';
 import 'contador_offline_page.dart';
 import 'home_page.dart';
 
-/// Versão exibida no rodapé das telas de entrada.
-///
-/// Atualizar aqui ao publicar novas releases — reflete em [LoginPage]
-/// e [ApiConfigPage].
-const kStoxVersao = 'STOX v1.0.0 — Grupo JCN';
-
 /// Tela de autenticação do STOX.
 ///
 /// Valida as credenciais contra o SAP Business One via [SapService.login].
@@ -110,127 +104,112 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (_, constraints) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: ConstrainedBox(
-                constraints:
-                    BoxConstraints(minHeight: constraints.maxHeight),
-                child: IntrinsicHeight(
-                  child: Column(
-                    children: [
-                      SizedBox(height: size.height * 0.08),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            children: [
+              SizedBox(height: size.height * 0.08),
 
-                      // ── Logo ──
-                      Image.asset(
-                        'assets/images/Logo_colorida.png',
-                        height: 80,
-                      ),
+              // ── Logo ──
+              Image.asset(
+                'assets/images/Logo_colorida.png',
+                height: 80,
+              ),
 
-                      const SizedBox(height: 24),
+              const SizedBox(height: 24),
 
-                      const Text(
-                        'Contagem de Estoque',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+              const Text(
+                'Contagem de Estoque',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
 
-                      const SizedBox(height: 8),
+              const SizedBox(height: 8),
 
-                      Text(
-                        'Informe seu usuário e senha do SAP',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
+              Text(
+                'Informe seu usuário e senha do SAP',
+                style: TextStyle(color: Colors.grey.shade600),
+              ),
 
-                      const SizedBox(height: 40),
+              const SizedBox(height: 40),
 
-                      // ── Formulário ──
-                      StoxTextField(
-                        controller: _usuarioController,
-                        labelText: 'Usuário',
-                        prefixIcon: Icons.person_outline,
-                        textInputAction: TextInputAction.next,
-                      ),
+              // ── Formulário ──
+              StoxTextField(
+                controller: _usuarioController,
+                labelText: 'Usuário',
+                prefixIcon: Icons.person_outline,
+                textInputAction: TextInputAction.next,
+              ),
 
-                      const SizedBox(height: 20),
+              const SizedBox(height: 20),
 
-                      StoxPasswordField(
-                        controller: _senhaController,
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => _login(),
-                      ),
+              StoxPasswordField(
+                controller: _senhaController,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _login(),
+              ),
 
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: StoxTextButton(
-                          label: 'Limpar',
-                          onPressed: _limparCampos,
-                        ),
-                      ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: StoxTextButton(
+                  label: 'Limpar',
+                  onPressed: _limparCampos,
+                ),
+              ),
 
-                      const SizedBox(height: 20),
+              const SizedBox(height: 20),
 
-                      // ── Ações primárias ──
-                      StoxButton(
-                        label: 'ENTRAR E SINCRONIZAR',
-                        loading: _carregando,
-                        onPressed: _login,
-                      ),
+              // ── Ações primárias ──
+              StoxButton(
+                label: 'ENTRAR E SINCRONIZAR',
+                loading: _carregando,
+                onPressed: _login,
+              ),
 
-                      const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-                      StoxOutlinedButton(
-                        label: 'MODO CONTADOR OFFLINE',
-                        icon: Icons.qr_code_scanner,
-                        onPressed: () => Navigator.push(
-                          context,
-                          StoxApp.transicaoPadrao(
-                            const ContadorOfflinePage(),
-                          ),
-                        ),
-                      ),
-
-                      const Spacer(),
-
-                      // ── Rodapé ──
-                      StoxTextButton(
-                        label: 'Configurações da API',
-                        icon: Icons.settings,
-                        onPressed: () => Navigator.push(
-                          context,
-                          StoxApp.transicaoPadrao(const ApiConfigPage()),
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      Text(
-                        kStoxVersao,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade400,
-                        ),
-                      ),
-
-                      SizedBox(
-                        height: bottomPadding > 0
-                            ? bottomPadding + 16
-                            : 24,
-                      ),
-                    ],
+              StoxOutlinedButton(
+                label: 'MODO CONTADOR OFFLINE',
+                icon: Icons.qr_code_scanner,
+                onPressed: () => Navigator.push(
+                  context,
+                  StoxApp.transicaoPadrao(
+                    const ContadorOfflinePage(),
                   ),
                 ),
               ),
-            );
-          },
+
+              const SizedBox(height: 32),
+
+              // ── Rodapé ──
+              StoxTextButton(
+                label: 'Configurações da API',
+                icon: Icons.settings,
+                onPressed: () => Navigator.push(
+                  context,
+                  StoxApp.transicaoPadrao(const ApiConfigPage()),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              Text(
+                'STOX v1.0.0 — Grupo JCN',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey.shade400,
+                ),
+              ),
+
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );

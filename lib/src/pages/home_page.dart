@@ -16,7 +16,7 @@ import 'contador_offline_page.dart';
 import 'import_page.dart';
 import 'item_search_page.dart';
 import 'log_page.dart';
-import 'login_page.dart' show kStoxVersao, LoginPage;
+import 'login_page.dart';
 
 /// Painel principal do STOX.
 ///
@@ -1520,38 +1520,28 @@ class _HomePageState extends State<HomePage> {
 
           // ── Rodapé do Drawer ──
           const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.logout_rounded, color: Colors.red),
-            title: const Text('Sair da Conta',
-                style: TextStyle(
-                    color: Colors.red, fontWeight: FontWeight.bold)),
-            onTap: () async {
-              HapticFeedback.heavyImpact();
-              await SapService.logout();
-              await DatabaseHelper.instance.logInfo(
-                'auth',
-                'Logout realizado',
-                mensagem: 'Operador: $_nomeOperador.',
-              );
-              if (!mounted) return;
-              Navigator.pushAndRemoveUntil(
-                context,
-                StoxApp.transicaoPadrao(const LoginPage()),
-                (r) => false,
-              );
-            },
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              8,
-              16,
-              24 + MediaQuery.of(context).viewPadding.bottom,
-            ),
-            child: Text(
-              kStoxVersao,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+          SafeArea(
+            top: false,
+            child: ListTile(
+              leading: const Icon(Icons.logout_rounded, color: Colors.red),
+              title: const Text('Sair da Conta',
+                  style: TextStyle(
+                      color: Colors.red, fontWeight: FontWeight.bold)),
+              onTap: () async {
+                HapticFeedback.heavyImpact();
+                await SapService.logout();
+                await DatabaseHelper.instance.logInfo(
+                  'auth',
+                  'Logout realizado',
+                  mensagem: 'Operador: $_nomeOperador.',
+                );
+                if (!mounted) return;
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  StoxApp.transicaoPadrao(const LoginPage()),
+                  (r) => false,
+                );
+              },
             ),
           ),
         ],

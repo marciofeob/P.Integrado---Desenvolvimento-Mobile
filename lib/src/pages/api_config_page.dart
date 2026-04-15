@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/stox_audio.dart';
 import '../widgets/widgets.dart';
-import 'login_page.dart' show kStoxVersao;
 
 /// Tela de configuração da conexão SAP Business One.
 ///
@@ -96,7 +95,6 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       appBar: AppBar(
@@ -105,131 +103,107 @@ class _ApiConfigPageState extends State<ApiConfigPage> {
         centerTitle: true,
       ),
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (_, constraints) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: ConstrainedBox(
-                constraints:
-                    BoxConstraints(minHeight: constraints.maxHeight),
-                child: IntrinsicHeight(
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 20),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
 
-                      // ── Cabeçalho ──
-                      const Text(
-                        'Conexão Service Layer',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        'Ajuste os endereços para sincronização '
-                        'com o SAP Business One.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                          fontSize: 14,
-                        ),
-                      ),
-
-                      const SizedBox(height: 30),
-
-                      // ── Campos ──
-                      StoxTextField(
-                        controller: _urlController,
-                        labelText: 'Service Layer URL',
-                        prefixIcon: Icons.link,
-                        helperText: 'Ex: https://192.168.1.10:50000/b1s/v1',
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      StoxTextField(
-                        controller: _companyController,
-                        labelText: 'CompanyDB',
-                        prefixIcon: Icons.business,
-                        helperText: 'Nome da base de dados SAP',
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      StoxTextField(
-                        controller: _depositoController,
-                        labelText: 'Depósito Padrão',
-                        prefixIcon: Icons.warehouse_rounded,
-                        textCapitalization: TextCapitalization.characters,
-                        helperText: 'Código do depósito (ex: 01)',
-                      ),
-
-                      const SizedBox(height: 25),
-
-                      // ── SSL ──
-                      StoxCard(
-                        child: SwitchListTile.adaptive(
-                          title: const Text('Permitir SSL auto-assinado'),
-                          subtitle: Text(
-                            'Ative se o servidor SAP usar certificado '
-                            'auto-assinado (padrão em ambientes on-premises).',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          value: _permitirSslInseguro,
-                          activeThumbColor: primaryColor,
-                          onChanged: (value) {
-                            HapticFeedback.selectionClick();
-                            setState(() => _permitirSslInseguro = value);
-                          },
-                        ),
-                      ),
-
-                      const SizedBox(height: 40),
-
-                      // ── Ações ──
-                      StoxButton(
-                        label: 'SALVAR CONFIGURAÇÕES',
-                        icon: Icons.save_rounded,
-                        onPressed: _salvarConfig,
-                      ),
-
-                      const Spacer(),
-
-                      // ── Rodapé ──
-                      StoxTextButton(
-                        label: 'Voltar',
-                        icon: Icons.arrow_back,
-                        onPressed: () => Navigator.pop(context),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      Text(
-                        kStoxVersao,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade400,
-                        ),
-                      ),
-
-                      SizedBox(
-                        height: bottomPadding > 0
-                            ? bottomPadding + 16
-                            : 24,
-                      ),
-                    ],
-                  ),
+              // ── Cabeçalho ──
+              const Text(
+                'Conexão Service Layer',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
                 ),
               ),
-            );
-          },
+
+              const SizedBox(height: 8),
+
+              Text(
+                'Ajuste os endereços para sincronização '
+                'com o SAP Business One.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 14,
+                ),
+              ),
+
+              const SizedBox(height: 30),
+
+              // ── Campos ──
+              StoxTextField(
+                controller: _urlController,
+                labelText: 'Service Layer URL',
+                prefixIcon: Icons.link,
+                helperText: 'Ex: https://192.168.1.10:50000/b1s/v1',
+              ),
+
+              const SizedBox(height: 20),
+
+              StoxTextField(
+                controller: _companyController,
+                labelText: 'CompanyDB',
+                prefixIcon: Icons.business,
+                helperText: 'Nome da base de dados SAP',
+              ),
+
+              const SizedBox(height: 20),
+
+              StoxTextField(
+                controller: _depositoController,
+                labelText: 'Depósito Padrão',
+                prefixIcon: Icons.warehouse_rounded,
+                textCapitalization: TextCapitalization.characters,
+                helperText: 'Código do depósito (ex: 01)',
+              ),
+
+              const SizedBox(height: 25),
+
+              // ── SSL ──
+              StoxCard(
+                child: SwitchListTile.adaptive(
+                  title: const Text('Permitir SSL auto-assinado'),
+                  subtitle: Text(
+                    'Ative se o servidor SAP usar certificado '
+                    'auto-assinado (padrão em ambientes on-premises).',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  value: _permitirSslInseguro,
+                  activeThumbColor: primaryColor,
+                  onChanged: (value) {
+                    HapticFeedback.selectionClick();
+                    setState(() => _permitirSslInseguro = value);
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 40),
+
+              // ── Ações ──
+              StoxButton(
+                label: 'SALVAR CONFIGURAÇÕES',
+                icon: Icons.save_rounded,
+                onPressed: _salvarConfig,
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Rodapé ──
+              StoxTextButton(
+                label: 'Voltar',
+                icon: Icons.arrow_back,
+                onPressed: () => Navigator.pop(context),
+              ),
+
+              const SizedBox(height: 24),
+
+            ],
+          ),
         ),
       ),
     );
